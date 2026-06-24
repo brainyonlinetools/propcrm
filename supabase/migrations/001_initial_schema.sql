@@ -127,6 +127,13 @@ alter table public.lead_notes enable row level security;
 alter table public.tasks enable row level security;
 
 -- Open policies for single-user no-auth v1
+drop policy if exists "anon_all" on public.field_definitions;
+drop policy if exists "anon_all" on public.pipeline_stages;
+drop policy if exists "anon_all" on public.projects;
+drop policy if exists "anon_all" on public.leads;
+drop policy if exists "anon_all" on public.inventory;
+drop policy if exists "anon_all" on public.lead_notes;
+drop policy if exists "anon_all" on public.tasks;
 create policy "anon_all" on public.field_definitions for all to anon using (true) with check (true);
 create policy "anon_all" on public.pipeline_stages for all to anon using (true) with check (true);
 create policy "anon_all" on public.projects for all to anon using (true) with check (true);
@@ -144,11 +151,13 @@ alter default privileges in schema public grant all on tables to anon;
 -- Seed: Pipeline stages
 insert into public.pipeline_stages (label, color, sort_order) values
   ('New', '#888888', 0),
-  ('Contacted', '#0070f3', 1),
-  ('Site Visit', '#7928ca', 2),
-  ('Negotiation', '#f5a623', 3),
-  ('Closed (Won)', '#50e3c2', 4),
-  ('Lost', '#ee0000', 5)
+  ('Qualified', '#0070f3', 1),
+  ('Call Back', '#f97316', 2),
+  ('Site Visit', '#7928ca', 3),
+  ('Negotiation', '#f5a623', 4),
+  ('Closed (Won)', '#50e3c2', 5),
+  ('Lost', '#ee0000', 6),
+  ('Disqualified', '#6b7280', 7)
 on conflict do nothing;
 
 -- Seed: Projects
@@ -211,7 +220,7 @@ select
   v.project_name,
   v.custom_data::jsonb
 from (values
-  ('Rajesh Malhotra', '9876543210', 'rajesh.m@email.com', 'Contacted', 'Meta', 'Anand Prime Residences', '{"budget": 2.8, "configuration": "3BHK", "possession_preference": "Ready to Move"}'),
+  ('Rajesh Malhotra', '9876543210', 'rajesh.m@email.com', 'Qualified', 'Meta', 'Anand Prime Residences', '{"budget": 2.8, "configuration": "3BHK", "possession_preference": "Ready to Move"}'),
   ('Priya Sharma', '9812345678', 'priya.sharma@email.com', 'Site Visit', 'Reference', 'Anand Prime Vista', '{"budget": 5.5, "configuration": "4BHK", "possession_preference": "2026"}'),
   ('Amit Khanna', '9988776655', null, 'New', 'Walk-in', 'Anand Prime Heights', '{"budget": 1.5, "configuration": "2BHK", "possession_preference": "Under Construction"}'),
   ('Neha Gupta', '9123456789', 'neha.g@email.com', 'Negotiation', 'Google', 'Anand Prime Residences', '{"budget": 4.2, "configuration": "4BHK", "possession_preference": "Ready to Move"}'),

@@ -15,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { CallButton } from "@/components/shared/CallButton";
 import { DynamicFieldRenderer } from "@/components/shared/DynamicFieldRenderer";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { StageBadge } from "@/components/shared/StatusBadge";
@@ -205,19 +206,24 @@ export default function UnitDetailPage({
         ) : (
           <div className="flex flex-col gap-2">
             {linkedLeads.map((lead) => (
-              <Link
+              <div
                 key={lead.id}
-                href={`/leads/${lead.id}`}
-                className="flex items-center justify-between rounded-md border border-border p-3 text-sm hover:bg-muted/50"
+                className="flex flex-col gap-2 rounded-md border border-border p-3"
               >
-                <span className="font-medium">{lead.name}</span>
-                {lead.pipeline_stages && (
-                  <StageBadge
-                    label={lead.pipeline_stages.label}
-                    color={lead.pipeline_stages.color}
-                  />
-                )}
-              </Link>
+                <Link
+                  href={`/leads/${lead.id}`}
+                  className="flex items-center justify-between text-sm hover:opacity-80"
+                >
+                  <span className="font-medium">{lead.name}</span>
+                  {lead.pipeline_stages && (
+                    <StageBadge
+                      label={lead.pipeline_stages.label}
+                      color={lead.pipeline_stages.color}
+                    />
+                  )}
+                </Link>
+                {lead.phone && <CallButton phone={lead.phone} className="w-full" />}
+              </div>
             ))}
           </div>
         )}

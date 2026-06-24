@@ -89,3 +89,48 @@ export async function updateLeadStatusColumn(
     },
   });
 }
+
+export interface SheetLeadRow {
+  sheetRow: number;
+  row: Record<string, string>;
+}
+
+export async function readMetaLeadRows(
+  options?: { sheetName?: string }
+): Promise<SheetLeadRow[]> {
+  const sheetId = process.env.GOOGLE_SHEET_ID;
+  if (!sheetId) {
+    throw new Error("Missing GOOGLE_SHEET_ID");
+  }
+
+  const sheetName = options?.sheetName ?? process.env.GOOGLE_SHEET_NAME ?? "Sheet1";
+  const sheets = getSheetsClient();
+
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: `${sheetName}!A:ZZ`,
+  });
+
+  const values = response.data.values ?? [];
+  if (values.length < 2) return [];
+
+  const headers = values[0].map((h) => String(h).trim());
+  const rows: SheetLeadRow[] = [];
+
+  for (let i = 1; i < values.length; i++) {
+    const line = values[i];
+    const row: Record<string, string> = {};
+
+    headers.forEach((header, index) => {
+      if (!header) return;
+      const cell = line[index];
+      row[header] = cell != null ? String(cell) : "";
+    });
+
+    if (!row.full_name && !row.id) continue;
+
+    rows.push({ sheetRow: i + 1, row });
+  }
+
+  return rows;
+}

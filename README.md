@@ -93,6 +93,24 @@ Share the Meta leads sheet with the service account email (Editor).
 5. Run `installTrigger()` once (creates onChange trigger for new rows)
 6. Optionally run `testSyncLastRow()` to test the last row
 
+### Backfill existing sheet rows
+
+**Option A — from your computer (recommended for many rows):**
+
+```bash
+npm run backfill:sheet          # import all rows
+npm run backfill:sheet -- --dry-run   # preview without importing
+```
+
+Requires `.env.local` with Google + Supabase vars. Duplicates are skipped; existing leads get `sheet_row` updated for nightly status sync.
+
+**Option B — from Google Apps Script:**
+
+1. Update `WEBHOOK_URL`, `WEBHOOK_SECRET`, and `SHEET_TAB_NAME` in the script
+2. Run `backfillAllRows()` once (under ~300 rows)
+3. For larger sheets, run `backfillBatch()` repeatedly until it says complete
+4. Use `resetBackfillCursor()` to start a batch backfill over
+
 ### Cron schedule
 
 Daily at **11:00 PM IST** (`vercel.json`). Manually test:

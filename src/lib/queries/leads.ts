@@ -18,7 +18,8 @@ export function useLeads() {
           pipeline_stages(id, label, color, sort_order)
         `
         )
-        .order("updated_at", { ascending: false });
+        .order("acquired_date", { ascending: false, nullsFirst: false })
+        .order("created_at", { ascending: false });
       if (error) throw error;
       return (data ?? []).map((row) => {
         const lead = row as Lead & { custom_data: unknown };
@@ -179,6 +180,22 @@ export function useUpdateLeadStage() {
     onSettled: (_data, _err, vars) => {
       queryClient.invalidateQueries({ queryKey: leadsKey });
       queryClient.invalidateQueries({ queryKey: leadKey(vars.id) });
+    },
+  });
+}
+
+export function useBulkUpdateLeadStage() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ ids, stage_id }: { ids: string[]; stage_id: string }) => {
+      const { error } = await supabase
+        .from("leads")
+        .update({ stage_id })
+        .in("id", ids);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: leadsKey });
     },
   });
 }

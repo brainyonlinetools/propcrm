@@ -2,21 +2,25 @@
 
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { LayoutGrid, List, Plus, Search, Upload, X, ChevronDown } from "lucide-react";
+import { CheckSquare, LayoutGrid, List, Plus, Search, Upload, X, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { LeadCard } from "@/components/leads/LeadCard";
 import { LeadKanban } from "@/components/leads/LeadKanban";
 import { LeadForm } from "@/components/leads/LeadForm";
+import { BatchStageChangeSheet } from "@/components/leads/BatchStageChangeSheet";
+import { BatchWhatsAppSheet } from "@/components/leads/BatchWhatsAppSheet";
 import { BulkImportSheet } from "@/components/shared/BulkImportSheet";
 import { CollapsibleFilterSection } from "@/components/shared/CollapsibleFilterSection";
 import { PullToRefresh } from "@/components/shared/PullToRefresh";
 import { leadsKey, useLeads } from "@/lib/queries/leads";
 import { usePipelineStages } from "@/lib/queries/pipelineStages";
 import { cn } from "@/lib/utils";
+import { DISQUALIFIED_STAGE_LABEL, isArchivedLead } from "@/types";
 
 type ViewMode = "list" | "kanban";
+type LeadViewFilter = "active" | "archived";
 
 export default function LeadsPage() {
   const [view, setView] = useState<ViewMode>("list");
@@ -24,9 +28,14 @@ export default function LeadsPage() {
   const [stageFilter, setStageFilter] = useState<string | null>(null);
   const [sourceFilter, setSourceFilter] = useState<string | null>(null);
   const [projectFilter, setProjectFilter] = useState<string | null>(null);
+  const [viewFilter, setViewFilter] = useState<LeadViewFilter>("active");
   const [formOpen, setFormOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [stageChangeOpen, setStageChangeOpen] = useState(false);
   const queryClient = useQueryClient();
 
   const { data: leads = [], isLoading, isError } = useLeads();
@@ -42,8 +51,20 @@ export default function LeadsPage() {
     [leads]
   );
 
+  const visibleStages = useMemo(
+    () =>
+      viewFilter === "archived"
+        ? stages
+        : stages.filter((s) => s.label !== DISQUALIFIED_STAGE_LABEL),
+    [stages, viewFilter]
+  );
+
   const filtered = useMemo(() => {
     return leads.filter((lead) => {
+      const archived = isArchivedLead(lead);
+      if (viewFilter === "active" && archived) return false;
+      if (viewFilter === "archived" && !archived) return false;
+
       const q = search.toLowerCase();
       const matchesSearch =
         !q ||
@@ -56,13 +77,19 @@ export default function LeadsPage() {
         !projectFilter || lead.project_interest === projectFilter;
       return matchesSearch && matchesStage && matchesSource && matchesProject;
     });
-  }, [leads, search, stageFilter, sourceFilter, projectFilter]);
+  }, [leads, search, stageFilter, sourceFilter, projectFilter, viewFilter]);
 
-  const activeFilterCount = [stageFilter, sourceFilter, projectFilter].filter(Boolean).length;
+  const activeFilterCount = [
+    viewFilter !== "active" ? viewFilter : null,
+    stageFilter,
+    sourceFilter,
+    projectFilter,
+  ].filter(Boolean).length;
   const activeStageLabel = stages.find((s) => s.id === stageFilter)?.label;
   const activeProjectLabel = projectFilter;
 
   function clearFilters() {
+    setViewFilter("active");
     setStageFilter(null);
     setSourceFilter(null);
     setProjectFilter(null);
@@ -72,12 +99,55 @@ export default function LeadsPage() {
     await queryClient.invalidateQueries({ queryKey: leadsKey });
   }
 
+  function toggleSelectionMode() {
+    setSelectionMode((active) => {
+      if (!active) setView("list");
+      if (active) setSelectedIds(new Set());
+      return !active;
+    });
+  }
+
+  function toggleLeadSelection(leadId: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(leadId)) next.delete(leadId);
+      else next.add(leadId);
+      return next;
+    });
+  }
+
+  function selectAllVisible() {
+    setSelectedIds(new Set(filtered.map((lead) => lead.id)));
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set());
+  }
+
+  const selectedLeads = useMemo(
+    () => filtered.filter((lead) => selectedIds.has(lead.id)),
+    [filtered, selectedIds]
+  );
+
+  function handleBatchComplete() {
+    setSelectionMode(false);
+    setSelectedIds(new Set());
+  }
+
   return (
     <div className="flex min-h-dvh flex-col">
       <header className="sticky top-0 z-40 border-b border-border bg-background/95 px-4 py-3 backdrop-blur-sm">
         <div className="flex items-center justify-between gap-2">
           <h1 className="text-lg font-semibold tracking-tight">Leads</h1>
           <div className="flex shrink-0 gap-1">
+            <Button
+              variant={selectionMode ? "secondary" : "ghost"}
+              size="icon"
+              onClick={toggleSelectionMode}
+              aria-label={selectionMode ? "Exit selection mode" : "Select leads for bulk actions"}
+            >
+              <CheckSquare />
+            </Button>
             <Button
               variant="ghost"
               size="icon"
@@ -154,6 +224,23 @@ export default function LeadsPage() {
               )}
 
               <CollapsibleFilterSection
+                title="View"
+                summary={viewFilter === "archived" ? "Archived" : "Active"}
+                hasActiveFilter={viewFilter !== "active"}
+              >
+                <FilterChip
+                  label="Active"
+                  active={viewFilter === "active"}
+                  onClick={() => setViewFilter("active")}
+                />
+                <FilterChip
+                  label="Archived"
+                  active={viewFilter === "archived"}
+                  onClick={() => setViewFilter("archived")}
+                />
+              </CollapsibleFilterSection>
+
+              <CollapsibleFilterSection
                 title="Stage"
                 summary={activeStageLabel ?? "All stages"}
                 hasActiveFilter={Boolean(stageFilter)}
@@ -163,7 +250,7 @@ export default function LeadsPage() {
                   active={!stageFilter}
                   onClick={() => setStageFilter(null)}
                 />
-                {stages.map((s) => (
+                {visibleStages.map((s) => (
                   <FilterChip
                     key={s.id}
                     label={s.label}
@@ -235,11 +322,19 @@ export default function LeadsPage() {
           />
         ) : filtered.length === 0 ? (
           <EmptyState
-            title={leads.length === 0 ? "No leads yet" : "No matching leads"}
+            title={
+              leads.length === 0
+                ? "No leads yet"
+                : viewFilter === "archived"
+                  ? "No archived leads"
+                  : "No matching leads"
+            }
             description={
               leads.length === 0
                 ? "Add your first enquiry from Golf Course Road, DLF, or Sector 62 walk-ins."
-                : "Try adjusting your search or filters."
+                : viewFilter === "archived"
+                  ? "Leads marked as Disqualified appear here."
+                  : "Try adjusting your search or filters."
             }
             actionLabel={leads.length === 0 ? "Add Lead" : undefined}
             onAction={leads.length === 0 ? () => setFormOpen(true) : undefined}
@@ -247,11 +342,17 @@ export default function LeadsPage() {
         ) : view === "list" ? (
           <div className="flex flex-col gap-3">
             {filtered.map((lead) => (
-              <LeadCard key={lead.id} lead={lead} />
+              <LeadCard
+                key={lead.id}
+                lead={lead}
+                selectionMode={selectionMode}
+                selected={selectedIds.has(lead.id)}
+                onToggleSelect={toggleLeadSelection}
+              />
             ))}
           </div>
         ) : (
-          <LeadKanban leads={filtered} stages={stages} className="-mx-4 px-4" />
+          <LeadKanban leads={filtered} stages={visibleStages} className="-mx-4 px-4" />
         )}
       </PullToRefresh>
 
@@ -264,11 +365,49 @@ export default function LeadsPage() {
         <Plus />
       </Button>
 
+      {selectionMode && selectedIds.size > 0 && (
+        <div className="fixed inset-x-0 bottom-16 z-40 border-t border-border bg-background/95 px-4 py-3 backdrop-blur-sm">
+          <div className="mx-auto flex max-w-lg flex-col gap-2">
+            <p className="text-sm font-medium">
+              {selectedIds.size} selected
+            </p>
+            <div className="flex gap-2">
+              <Button variant="outline" className="h-10 flex-1" onClick={selectAllVisible}>
+                Select all
+              </Button>
+              <Button variant="outline" className="h-10 flex-1" onClick={clearSelection}>
+                Clear
+              </Button>
+            </div>
+            <div className="flex gap-2">
+              <Button className="h-10 flex-1" onClick={() => setStageChangeOpen(true)}>
+                Change stage
+              </Button>
+              <Button variant="secondary" className="h-10 flex-1" onClick={() => setBatchOpen(true)}>
+                WhatsApp
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <LeadForm open={formOpen} onOpenChange={setFormOpen} />
       <BulkImportSheet
         entityType="lead"
         open={importOpen}
         onOpenChange={setImportOpen}
+      />
+      <BatchStageChangeSheet
+        leads={selectedLeads}
+        open={stageChangeOpen}
+        onOpenChange={setStageChangeOpen}
+        onComplete={handleBatchComplete}
+      />
+      <BatchWhatsAppSheet
+        leads={selectedLeads}
+        open={batchOpen}
+        onOpenChange={setBatchOpen}
+        onComplete={handleBatchComplete}
       />
     </div>
   );

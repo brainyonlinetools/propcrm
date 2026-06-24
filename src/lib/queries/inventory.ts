@@ -18,7 +18,8 @@ export function useInventory() {
           projects(id, name, location)
         `
         )
-        .order("updated_at", { ascending: false });
+        .order("acquired_date", { ascending: false, nullsFirst: false })
+        .order("created_at", { ascending: false });
       if (error) throw error;
       return (data ?? []).map((row) => {
         const item = row as Inventory & { custom_data: unknown };

@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/command";
 import { DynamicFieldRenderer } from "@/components/shared/DynamicFieldRenderer";
 import { StageBadge } from "@/components/shared/StatusBadge";
+import { CallButton } from "@/components/shared/CallButton";
 import { WhatsAppButton } from "@/components/shared/WhatsAppButton";
 import { LeadForm } from "@/components/leads/LeadForm";
 import { TaskItem } from "@/components/tasks/TaskItem";
@@ -192,12 +193,10 @@ export default function LeadDetailPage({
           </Select>
         </div>
 
-        <WhatsAppButton
-          name={lead.name}
-          phone={lead.phone}
-          projectName={lead.project_interest}
-          className="w-full"
-        />
+        <div className="flex gap-2">
+          <CallButton phone={lead.phone} className="flex-1" />
+          <WhatsAppButton lead={lead} className="flex-1" />
+        </div>
       </section>
 
       <section className="rounded-lg border border-border bg-card p-4 shadow-card">

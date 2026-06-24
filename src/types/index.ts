@@ -42,6 +42,15 @@ export interface Project {
   created_at: string;
 }
 
+export interface WhatsAppTemplate {
+  id: string;
+  name: string;
+  body: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Lead {
   id: string;
   name: string;
@@ -112,6 +121,12 @@ export interface InventoryInsert {
   status?: InventoryStatus;
   acquired_date?: string | null;
   custom_data?: Record<string, unknown>;
+}
+
+export const DISQUALIFIED_STAGE_LABEL = "Disqualified";
+
+export function isArchivedLead(lead: Pick<Lead, "pipeline_stages">): boolean {
+  return lead.pipeline_stages?.label === DISQUALIFIED_STAGE_LABEL;
 }
 
 export const LEAD_SOURCES = ["Meta", "Google", "Reference", "Walk-in", "99acres", "MagicBricks"] as const;

@@ -48,7 +48,7 @@ export default function RootLayout({
               {children}
             </div>
             <BottomNav />
-            <Toaster position="top-center" richColors />
+            <Toaster position="bottom-center" richColors offset="5rem" />
           </QueryProvider>
         </ThemeProvider>
       </body>

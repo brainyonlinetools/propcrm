@@ -33,6 +33,14 @@ export function phoneToWhatsApp(phone: string | null | undefined): string {
   return digits;
 }
 
+export function phoneToTel(phone: string | null | undefined): string {
+  if (!phone) return "";
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length === 10) return `+91${digits}`;
+  if (digits.length === 12 && digits.startsWith("91")) return `+${digits}`;
+  return phone.startsWith("+") ? phone : `+${digits}`;
+}
+
 export function formatRelativeDate(dateStr: string | null | undefined): string {
   if (!dateStr) return "—";
   const date = new Date(dateStr);

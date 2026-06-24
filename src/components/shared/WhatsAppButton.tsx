@@ -2,25 +2,30 @@
 
 import { MessageCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { getAgentName, phoneToWhatsApp } from "@/lib/utils";
+import { useWhatsAppTemplates } from "@/lib/queries/whatsappTemplates";
+import {
+  buildWhatsAppUrl,
+  DEFAULT_WHATSAPP_TEMPLATE_BODY,
+  renderWhatsAppTemplate,
+} from "@/lib/whatsappTemplates";
+import type { Lead } from "@/types";
 
 interface WhatsAppButtonProps {
-  name: string;
-  phone: string | null;
-  projectName?: string | null;
+  lead: Pick<Lead, "name" | "phone" | "project_interest" | "email" | "source" | "custom_data" | "pipeline_stages">;
+  templateBody?: string;
   className?: string;
 }
 
-export function WhatsAppButton({ name, phone, projectName, className }: WhatsAppButtonProps) {
-  if (!phone) return null;
+export function WhatsAppButton({ lead, templateBody, className }: WhatsAppButtonProps) {
+  const { data: templates = [] } = useWhatsAppTemplates();
 
-  const agentName = getAgentName() || "your Anand Prime advisor";
-  const project = projectName ?? "our projects";
-  const message = encodeURIComponent(
-    `Hi ${name}, this is ${agentName} from Anand Prime. Following up regarding your enquiry about ${project}.`
-  );
-  const waPhone = phoneToWhatsApp(phone);
-  const href = `https://wa.me/${waPhone}?text=${message}`;
+  if (!lead.phone) return null;
+
+  const body =
+    templateBody ?? templates[0]?.body ?? DEFAULT_WHATSAPP_TEMPLATE_BODY;
+  const message = renderWhatsAppTemplate(body, lead as Lead);
+  const href = buildWhatsAppUrl(lead.phone, message);
+  if (!href) return null;
 
   return (
     <Button asChild className={className} size="lg">

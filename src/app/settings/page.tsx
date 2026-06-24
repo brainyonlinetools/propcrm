@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
@@ -62,7 +63,14 @@ import {
   useProjects,
   useUpdateProject,
 } from "@/lib/queries/projects";
+import {
+  useCreateWhatsAppTemplate,
+  useDeleteWhatsAppTemplate,
+  useUpdateWhatsAppTemplate,
+  useWhatsAppTemplates,
+} from "@/lib/queries/whatsappTemplates";
 import { getAgentName, setAgentName, slugify } from "@/lib/utils";
+import { getWhatsAppTemplateVariables } from "@/lib/whatsappTemplates";
 import type { EntityType, FieldDefinition, FieldType } from "@/types";
 
 const FIELD_TYPES: { value: FieldType; label: string }[] = [
@@ -156,6 +164,7 @@ export default function SettingsPage() {
               onChange={(e) => handleAgentNameSave(e.target.value)}
             />
           </section>
+          <WhatsAppTemplatesManager />
         </TabsContent>
       </Tabs>
     </div>
@@ -611,6 +620,156 @@ function ProjectsManager() {
         />
         <Button onClick={handleAdd} disabled={!name.trim()}>
           Add Project
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+function WhatsAppTemplatesManager() {
+  const { data: templates = [] } = useWhatsAppTemplates();
+  const { data: leadFields = [] } = useFieldDefinitions("lead");
+  const createTemplate = useCreateWhatsAppTemplate();
+  const updateTemplate = useUpdateWhatsAppTemplate();
+  const deleteTemplate = useDeleteWhatsAppTemplate();
+
+  const [name, setName] = useState("");
+  const [body, setBody] = useState("");
+  const [activeBodyId, setActiveBodyId] = useState<string | null>(null);
+
+  const variables = getWhatsAppTemplateVariables(leadFields);
+
+  async function handleAdd() {
+    if (!name.trim() || !body.trim()) return;
+    try {
+      await createTemplate.mutateAsync({ name: name.trim(), body: body.trim() });
+      setName("");
+      setBody("");
+      toast.success("Template added");
+    } catch {
+      toast.error("Failed to add template");
+    }
+  }
+
+  function insertVariable(token: string, target: "new" | string) {
+    const insertion = `{{${token}}}`;
+    if (target === "new") {
+      setBody((prev) => prev + insertion);
+      return;
+    }
+    const textarea = document.getElementById(`wa-template-body-${target}`) as HTMLTextAreaElement | null;
+    if (!textarea) return;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const current = textarea.value;
+    const next = current.slice(0, start) + insertion + current.slice(end);
+    textarea.value = next;
+    updateTemplate.mutate({ id: target, body: next });
+    requestAnimationFrame(() => {
+      textarea.focus();
+      const cursor = start + insertion.length;
+      textarea.setSelectionRange(cursor, cursor);
+    });
+  }
+
+  return (
+    <section className="rounded-lg border border-border bg-card p-4 shadow-card">
+      <h2 className="mb-1 text-sm font-semibold">WhatsApp Templates</h2>
+      <p className="mb-3 text-xs text-muted-foreground">
+        Saved messages for batch and single-lead WhatsApp. Tap a variable to insert it.
+      </p>
+
+      <div className="mb-3 flex flex-wrap gap-1.5">
+        {variables.map((variable) => (
+          <button
+            key={variable.key}
+            type="button"
+            onClick={() => insertVariable(variable.key, activeBodyId ?? "new")}
+            className="rounded-full border border-border bg-secondary px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+          >
+            {`{{${variable.key}}}`}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex flex-col gap-3">
+        {templates.map((template) => (
+          <div
+            key={template.id}
+            className="flex flex-col gap-2 rounded-md border border-border p-3"
+          >
+            <Input
+              className="h-9"
+              defaultValue={template.name}
+              onBlur={(e) => {
+                if (e.target.value !== template.name) {
+                  updateTemplate.mutate({ id: template.id, name: e.target.value });
+                }
+              }}
+            />
+            <Textarea
+              id={`wa-template-body-${template.id}`}
+              className="min-h-24"
+              defaultValue={template.body}
+              onFocus={() => setActiveBodyId(template.id)}
+              onBlur={(e) => {
+                if (e.target.value !== template.body) {
+                  updateTemplate.mutate({ id: template.id, body: e.target.value });
+                }
+              }}
+            />
+            <div className="flex justify-end">
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="ghost" size="icon-sm">
+                    <Trash2 className="text-destructive" />
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete template?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This template will be removed from batch WhatsApp options.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={async () => {
+                        try {
+                          await deleteTemplate.mutateAsync(template.id);
+                          toast.success("Template deleted");
+                        } catch {
+                          toast.error("Failed to delete template");
+                        }
+                      }}
+                    >
+                      Delete
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-4 flex flex-col gap-2 border-t border-border pt-4">
+        <Input
+          className="h-12"
+          placeholder="Template name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <Textarea
+          className="min-h-24"
+          placeholder="Hi {{name}}, this is {{agent}} from Anand Prime..."
+          value={body}
+          onFocus={() => setActiveBodyId(null)}
+          onChange={(e) => setBody(e.target.value)}
+        />
+        <Button onClick={handleAdd} disabled={!name.trim() || !body.trim()}>
+          Add Template
         </Button>
       </div>
     </section>
