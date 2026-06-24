@@ -1,0 +1,8 @@
+# For local Supabase CLI usage — link to your Mumbai project:
+# supabase login && supabase link --project-ref <ref>
+
+[project]
+id = "anand-prime-crm"
+
+[db]
+major_version = 15
