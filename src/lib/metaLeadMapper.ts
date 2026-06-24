@@ -130,7 +130,7 @@ export function mapMetaRowToLead(
       email: row.email?.trim().toLowerCase() || null,
       source: "Meta",
       stage_id: options.defaultStageId,
-      project_interest: row.form_name?.trim() || row.campaign_name?.trim() || null,
+      project_interest: row.campaign_name?.trim() || row.form_name?.trim() || null,
       acquired_date: parseMetaCreatedTime(row.created_time),
       custom_data: customData,
     },

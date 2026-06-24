@@ -61,7 +61,7 @@ describe("mapMetaRowToLead", () => {
       phone: "6209590793",
       email: "mukeshthakor6209590793@gmail.com",
       source: "Meta",
-      project_interest: "Fresh 2026 (Emaar & SS)",
+      project_interest: "SS Camasa",
       acquired_date: "2026-06-22",
       stage_id: "stage-new",
     });
@@ -73,6 +73,21 @@ describe("mapMetaRowToLead", () => {
       imported_from_sheet: true,
       sheet_row: 42,
       platform: "ig",
+      campaign_name: "SS Camasa",
+      form_name: "Fresh 2026 (Emaar & SS)",
     });
+  });
+
+  it("falls back to form_name when campaign_name is empty", () => {
+    const result = mapMetaRowToLead(
+      {
+        full_name: "Test Lead",
+        form_name: "Fresh 2026 (Emaar & SS)",
+        campaign_name: "",
+      },
+      { sheetRow: 1, defaultStageId: "stage-new" }
+    );
+
+    expect(result.lead?.project_interest).toBe("Fresh 2026 (Emaar & SS)");
   });
 });
