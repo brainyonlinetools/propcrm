@@ -193,10 +193,10 @@ export default function LeadDetailPage({
           </Select>
         </div>
 
-        <div className="flex gap-2">
-          <CallButton phone={lead.phone} className="flex-1" />
-          <WhatsAppButton lead={lead} className="flex-1" />
-        </div>
+      <div className="flex gap-2">
+        <CallButton phone={lead.phone} leadId={lead.id} className="flex-1" />
+        <WhatsAppButton lead={lead} className="flex-1" />
+      </div>
       </section>
 
       <section className="rounded-lg border border-border bg-card p-4 shadow-card">
