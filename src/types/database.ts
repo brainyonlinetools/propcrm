@@ -195,6 +195,30 @@ export interface Database {
         };
         Relationships: [];
       };
+      inventory_notes: {
+        Row: {
+          id: string;
+          inventory_id: string;
+          content: string;
+          note_type: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          inventory_id: string;
+          content: string;
+          note_type?: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          inventory_id?: string;
+          content?: string;
+          note_type?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       tasks: {
         Row: {
           id: string;

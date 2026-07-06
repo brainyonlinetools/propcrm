@@ -1,11 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
-import type { LeadNote, NoteType, Task } from "@/types";
+import type { InventoryNote, LeadNote, NoteType, Task } from "@/types";
 import { leadsKey } from "./leads";
+import { inventoryKey } from "./inventory";
 
 export const tasksKey = (includeDone: boolean) => ["tasks", { includeDone }] as const;
 export const leadNotesKey = (leadId: string) => ["lead_notes", leadId] as const;
 export const leadTasksKey = (leadId: string) => ["tasks", "lead", leadId] as const;
+export const inventoryNotesKey = (inventoryId: string) => ["inventory_notes", inventoryId] as const;
 
 export function useTasks(includeDone = false) {
   return useQuery({
@@ -126,6 +128,49 @@ export function useCreateLeadNote() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: leadNotesKey(data.lead_id) });
       queryClient.invalidateQueries({ queryKey: leadsKey });
+    },
+  });
+}
+
+export function useInventoryNotes(inventoryId: string) {
+  return useQuery({
+    queryKey: inventoryNotesKey(inventoryId),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("inventory_notes")
+        .select("*")
+        .eq("inventory_id", inventoryId)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data as InventoryNote[];
+    },
+    enabled: Boolean(inventoryId),
+  });
+}
+
+export function useCreateInventoryNote() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      inventory_id,
+      content,
+      note_type,
+    }: {
+      inventory_id: string;
+      content: string;
+      note_type: NoteType;
+    }) => {
+      const { data, error } = await supabase
+        .from("inventory_notes")
+        .insert({ inventory_id, content, note_type })
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: inventoryNotesKey(data.inventory_id) });
+      queryClient.invalidateQueries({ queryKey: inventoryKey });
     },
   });
 }

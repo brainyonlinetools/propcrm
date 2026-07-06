@@ -90,6 +90,14 @@ export interface LeadNote {
   created_at: string;
 }
 
+export interface InventoryNote {
+  id: string;
+  inventory_id: string;
+  content: string;
+  note_type: NoteType;
+  created_at: string;
+}
+
 export interface Task {
   id: string;
   lead_id: string;

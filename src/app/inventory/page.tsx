@@ -12,7 +12,6 @@ import { BulkImportSheet } from "@/components/shared/BulkImportSheet";
 import { CollapsibleFilterSection } from "@/components/shared/CollapsibleFilterSection";
 import { PullToRefresh } from "@/components/shared/PullToRefresh";
 import { inventoryKey, useInventory } from "@/lib/queries/inventory";
-import { useProjects } from "@/lib/queries/projects";
 import { cn } from "@/lib/utils";
 import type { InventoryStatus } from "@/types";
 
@@ -29,21 +28,26 @@ export default function InventoryPage() {
   const queryClient = useQueryClient();
 
   const { data: units = [], isLoading, isError } = useInventory();
-  const { data: projects = [] } = useProjects();
 
   const unitTypes = useMemo(
     () => [...new Set(units.map((u) => u.unit_type).filter(Boolean))] as string[],
     [units]
   );
 
+  const projectNames = useMemo(
+    () => [...new Set(units.map((u) => (u.custom_data?.project_name as string) ?? "").filter(Boolean))] as string[],
+    [units]
+  );
+
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
     return units.filter((unit) => {
+      const projectName = (unit.custom_data?.project_name as string) ?? unit.projects?.name ?? "";
       const matchesSearch =
         !q ||
         unit.unit_number.toLowerCase().includes(q) ||
-        (unit.projects?.name.toLowerCase().includes(q) ?? false);
-      const matchesProject = !projectFilter || unit.project_id === projectFilter;
+        projectName.toLowerCase().includes(q);
+      const matchesProject = !projectFilter || projectName === projectFilter;
       const matchesStatus = !statusFilter || unit.status === statusFilter;
       const matchesType = !typeFilter || unit.unit_type === typeFilter;
       return matchesSearch && matchesProject && matchesStatus && matchesType;
@@ -51,7 +55,7 @@ export default function InventoryPage() {
   }, [units, search, projectFilter, statusFilter, typeFilter]);
 
   const activeFilterCount = [statusFilter, projectFilter, typeFilter].filter(Boolean).length;
-  const activeProjectLabel = projects.find((p) => p.id === projectFilter)?.name;
+  const activeProjectLabel = projectFilter;
 
   function clearFilters() {
     setStatusFilter(null);
@@ -156,12 +160,12 @@ export default function InventoryPage() {
                   active={!projectFilter}
                   onClick={() => setProjectFilter(null)}
                 />
-                {projects.map((p) => (
+                {projectNames.map((name) => (
                   <FilterChip
-                    key={p.id}
-                    label={p.name.split(" ").slice(-1)[0]}
-                    active={projectFilter === p.id}
-                    onClick={() => setProjectFilter(projectFilter === p.id ? null : p.id)}
+                    key={name}
+                    label={name}
+                    active={projectFilter === name}
+                    onClick={() => setProjectFilter(projectFilter === name ? null : name)}
                   />
                 ))}
               </CollapsibleFilterSection>

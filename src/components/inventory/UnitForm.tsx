@@ -23,17 +23,19 @@ import {
 } from "@/components/ui/sheet";
 import { DynamicFieldRenderer } from "@/components/shared/DynamicFieldRenderer";
 import { useCreateInventory, useUpdateInventory } from "@/lib/queries/inventory";
-import { useProjects } from "@/lib/queries/projects";
 import type { Inventory, InventoryStatus } from "@/types";
 
 const unitSchema = z.object({
   unit_number: z.string().min(1, "Unit number is required"),
+  project_name: z.string().optional(),
   unit_type: z.string().optional(),
   area_sqft: z.string().optional(),
   price: z.string().optional(),
-  project_id: z.string().optional(),
   status: z.enum(["available", "blocked", "booked", "sold"]),
   acquired_date: z.string().optional(),
+  property_type: z.enum(["sale", "rent"]).optional(),
+  owner_name: z.string().optional(),
+  owner_phone: z.string().optional(),
 });
 
 type UnitFormValues = z.infer<typeof unitSchema>;
@@ -48,7 +50,6 @@ interface UnitFormProps {
 
 export function UnitForm({ open, onOpenChange, unit }: UnitFormProps) {
   const [customData, setCustomData] = useState<Record<string, unknown>>({});
-  const { data: projects = [] } = useProjects();
   const createInventory = useCreateInventory();
   const updateInventory = useUpdateInventory();
 
@@ -71,9 +72,12 @@ export function UnitForm({ open, onOpenChange, unit }: UnitFormProps) {
         unit_type: unit.unit_type ?? "",
         area_sqft: unit.area_sqft?.toString() ?? "",
         price: unit.price?.toString() ?? "",
-        project_id: unit.project_id ?? undefined,
         status: unit.status,
         acquired_date: unit.acquired_date ?? undefined,
+        project_name: (unit.custom_data?.project_name as string) ?? "",
+        property_type: (unit.custom_data?.property_type as "sale" | "rent") ?? undefined,
+        owner_name: (unit.custom_data?.owner_name as string) ?? "",
+        owner_phone: (unit.custom_data?.owner_phone as string) ?? "",
       });
       setCustomData(unit.custom_data ?? {});
     } else {
@@ -89,10 +93,15 @@ export function UnitForm({ open, onOpenChange, unit }: UnitFormProps) {
         unit_type: values.unit_type || null,
         area_sqft: values.area_sqft ? Number(values.area_sqft) : null,
         price: values.price ? Number(values.price) : null,
-        project_id: values.project_id || null,
         status: values.status,
         acquired_date: values.acquired_date || null,
-        custom_data: customData,
+        custom_data: {
+          ...customData,
+          ...(values.project_name ? { project_name: values.project_name } : {}),
+          ...(values.property_type ? { property_type: values.property_type } : {}),
+          ...(values.owner_name ? { owner_name: values.owner_name } : {}),
+          ...(values.owner_phone ? { owner_phone: values.owner_phone } : {}),
+        },
       };
 
       if (unit) {
@@ -124,20 +133,22 @@ export function UnitForm({ open, onOpenChange, unit }: UnitFormProps) {
           </div>
 
           <div className="flex flex-col gap-2">
-            <Label>Project</Label>
+            <Label htmlFor="project_name">Project Name</Label>
+            <Input id="project_name" className="h-12" placeholder="e.g. Anand Prime Residences" {...register("project_name")} />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <Label>Property Type</Label>
             <Select
-              value={watch("project_id") ?? ""}
-              onValueChange={(v) => setValue("project_id", v)}
+              value={watch("property_type") ?? ""}
+              onValueChange={(v) => setValue("property_type", v as "sale" | "rent")}
             >
               <SelectTrigger className="h-12 w-full">
-                <SelectValue placeholder="Select project" />
+                <SelectValue placeholder="Select type" />
               </SelectTrigger>
               <SelectContent>
-                {projects.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.name}
-                  </SelectItem>
-                ))}
+                <SelectItem value="sale">Sale</SelectItem>
+                <SelectItem value="rent">Rent</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -185,6 +196,20 @@ export function UnitForm({ open, onOpenChange, unit }: UnitFormProps) {
               className="h-12"
               {...register("acquired_date")}
             />
+          </div>
+
+          <div className="border-t border-border pt-2">
+            <h3 className="mb-3 text-sm font-semibold text-foreground">Owner Details</h3>
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="owner_name">Owner Name</Label>
+                <Input id="owner_name" className="h-12" placeholder="Owner's name" {...register("owner_name")} />
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="owner_phone">Owner Phone</Label>
+                <Input id="owner_phone" type="tel" className="h-12" placeholder="Owner's phone number" {...register("owner_phone")} />
+              </div>
+            </div>
           </div>
 
           <DynamicFieldRenderer

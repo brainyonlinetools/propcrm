@@ -12,6 +12,7 @@ interface UnitCardProps {
 export function UnitCard({ unit }: UnitCardProps) {
   const floor = unit.custom_data.floor;
   const facing = unit.custom_data.facing;
+  const projectName = (unit.custom_data?.project_name as string) ?? unit.projects?.name;
 
   return (
     <Link
@@ -22,8 +23,8 @@ export function UnitCard({ unit }: UnitCardProps) {
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <h3 className="truncate text-sm font-semibold">{unit.unit_number}</h3>
-            {unit.projects && (
-              <p className="truncate text-xs text-muted-foreground">{unit.projects.name}</p>
+            {projectName && (
+              <p className="truncate text-xs text-muted-foreground">{projectName}</p>
             )}
           </div>
           <StatusBadge status={unit.status} className="shrink-0" />

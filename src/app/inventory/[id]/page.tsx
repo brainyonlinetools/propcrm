@@ -2,7 +2,8 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ArrowLeft, MessageCircle, Pencil, Phone, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,14 +16,26 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { CallButton } from "@/components/shared/CallButton";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { DynamicFieldRenderer } from "@/components/shared/DynamicFieldRenderer";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { StageBadge } from "@/components/shared/StatusBadge";
-import { useInventoryItem, useUpdateInventory } from "@/lib/queries/inventory";
+import { UnitForm } from "@/components/inventory/UnitForm";
+import { useInventoryItem, useUpdateInventory, useDeleteInventory } from "@/lib/queries/inventory";
 import { useLeadsByUnit } from "@/lib/queries/leads";
-import { formatCurrency } from "@/lib/utils";
-import type { InventoryStatus } from "@/types";
+import { useInventoryNotes, useCreateInventoryNote } from "@/lib/queries/tasks";
+import { formatCurrency, formatRelativeDate, phoneToTel, phoneToWhatsApp } from "@/lib/utils";
+import { NOTE_TYPE_CONFIG, type InventoryStatus, type NoteType } from "@/types";
 
 const STATUSES: InventoryStatus[] = ["available", "blocked", "booked", "sold"];
 
@@ -32,10 +45,18 @@ export default function UnitDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
+  const router = useRouter();
   const { data: unit, isLoading } = useInventoryItem(id);
   const { data: linkedLeads = [] } = useLeadsByUnit(id);
+  const { data: notes = [] } = useInventoryNotes(id);
   const updateInventory = useUpdateInventory();
+  const deleteInventory = useDeleteInventory();
+  const createNote = useCreateInventoryNote();
+  const [editOpen, setEditOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [customData, setCustomData] = useState<Record<string, unknown>>({});
+  const [noteType, setNoteType] = useState<NoteType>("note");
+  const [noteContent, setNoteContent] = useState("");
 
   useEffect(() => {
     if (unit) {
@@ -81,6 +102,57 @@ export default function UnitDetailPage({
     }
   }
 
+  async function handleDelete() {
+    try {
+      await deleteInventory.mutateAsync(id);
+      toast.success("Unit deleted");
+      router.push("/inventory");
+    } catch {
+      toast.error("Failed to delete unit");
+    }
+  }
+
+  async function handleAddNote() {
+    if (!noteContent.trim()) return;
+    try {
+      await createNote.mutateAsync({
+        inventory_id: id,
+        content: noteContent.trim(),
+        note_type: noteType,
+      });
+      setNoteContent("");
+      toast.success("Note added");
+    } catch {
+      toast.error("Failed to add note");
+    }
+  }
+
+  async function logOwnerCall() {
+    try {
+      await createNote.mutateAsync({
+        inventory_id: id,
+        content: "Call initiated to owner",
+        note_type: "call",
+      });
+    } catch {
+      // silent fail
+    }
+  }
+
+  async function logOwnerWhatsApp() {
+    try {
+      await createNote.mutateAsync({
+        inventory_id: id,
+        content: "WhatsApp message sent to owner",
+        note_type: "whatsapp",
+      });
+    } catch {
+      // silent fail
+    }
+  }
+
+  const ownerPhone = unit.custom_data?.owner_phone as string | undefined;
+
   return (
     <div className="flex flex-col gap-6 p-4">
       <div className="flex items-center gap-2">
@@ -91,11 +163,36 @@ export default function UnitDetailPage({
         </Button>
         <div className="flex-1">
           <h1 className="text-lg font-semibold">{unit.unit_number}</h1>
-          {unit.projects && (
-            <p className="text-sm text-muted-foreground">{unit.projects.name}</p>
+          {(unit.custom_data?.project_name ?? unit.projects?.name) && (
+            <p className="text-sm text-muted-foreground">
+              {(unit.custom_data?.project_name as string) ?? unit.projects?.name}
+            </p>
           )}
         </div>
-        <StatusBadge status={unit.status} />
+        <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+          <AlertDialogTrigger asChild>
+            <Button variant="ghost" size="icon" aria-label="Delete unit">
+              <Trash2 className="text-destructive" />
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent size="sm">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete unit?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to delete {unit.unit_number}? This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction variant="destructive" onClick={handleDelete}>
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+        <Button variant="ghost" size="icon" onClick={() => setEditOpen(true)} aria-label="Edit unit">
+          <Pencil />
+        </Button>
       </div>
 
       <section className="flex flex-col gap-2">
@@ -120,6 +217,20 @@ export default function UnitDetailPage({
       <section className="rounded-lg border border-border bg-card p-4 shadow-card">
         <h2 className="mb-3 text-sm font-semibold">Unit Details</h2>
         <div className="flex flex-col gap-4">
+          {Boolean(unit.custom_data?.property_type) && (
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Property Type</span>
+              <span className="font-medium capitalize">{String(unit.custom_data.property_type)}</span>
+            </div>
+          )}
+
+          {Boolean(unit.custom_data?.project_name) && (
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Project</span>
+              <span className="font-medium">{String(unit.custom_data.project_name)}</span>
+            </div>
+          )}
+
           <div className="flex flex-col gap-2">
             <Label htmlFor="unit_type">Unit Type</Label>
             <Input
@@ -184,6 +295,42 @@ export default function UnitDetailPage({
         </div>
       </section>
 
+      {(Boolean(unit.custom_data?.owner_name) || Boolean(ownerPhone)) && (
+        <section className="rounded-lg border border-border bg-card p-4 shadow-card">
+          <h2 className="mb-3 text-sm font-semibold">Owner Details</h2>
+          <div className="flex flex-col gap-2 text-sm">
+            {Boolean(unit.custom_data?.owner_name) && (
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Name</span>
+                <span className="font-medium">{String(unit.custom_data.owner_name)}</span>
+              </div>
+            )}
+            {Boolean(ownerPhone) && (
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Phone</span>
+                <span className="font-medium">{ownerPhone}</span>
+              </div>
+            )}
+          </div>
+          {ownerPhone && (
+            <div className="mt-3 flex gap-2">
+              <Button asChild className="flex-1" size="lg" variant="outline" onClick={logOwnerCall}>
+                <a href={`tel:${phoneToTel(ownerPhone)}`}>
+                  <Phone data-icon="inline-start" />
+                  Call
+                </a>
+              </Button>
+              <Button asChild className="flex-1" size="lg" onClick={logOwnerWhatsApp}>
+                <a href={`https://wa.me/${phoneToWhatsApp(ownerPhone)}`} target="_blank" rel="noopener noreferrer">
+                  <MessageCircle data-icon="inline-start" />
+                  WhatsApp
+                </a>
+              </Button>
+            </div>
+          )}
+        </section>
+      )}
+
       <section className="rounded-lg border border-border bg-card p-4 shadow-card">
         <h2 className="mb-3 text-sm font-semibold">Custom Fields</h2>
         <DynamicFieldRenderer
@@ -197,6 +344,51 @@ export default function UnitDetailPage({
         <Button className="mt-4 w-full" onClick={saveCustomData}>
           Save Custom Fields
         </Button>
+      </section>
+
+      <section className="rounded-lg border border-border bg-card p-4 shadow-card">
+        <h2 className="mb-3 text-sm font-semibold">Activity</h2>
+        <div className="flex flex-col gap-3">
+          {notes.map((note) => (
+            <div key={note.id} className="flex gap-2 border-b border-border pb-3 last:border-0">
+              <span className="text-base">{NOTE_TYPE_CONFIG[note.note_type].icon}</span>
+              <div className="flex-1">
+                <p className="text-sm">{note.content}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {formatRelativeDate(note.created_at)}
+                </p>
+              </div>
+            </div>
+          ))}
+          {notes.length === 0 && (
+            <p className="text-sm text-muted-foreground">No activity yet</p>
+          )}
+        </div>
+        <div className="mt-3 flex flex-col gap-2 border-t border-border pt-3">
+          <div className="flex gap-2">
+            {(Object.keys(NOTE_TYPE_CONFIG) as NoteType[]).map((type) => (
+              <Button
+                key={type}
+                type="button"
+                variant={noteType === type ? "secondary" : "ghost"}
+                size="sm"
+                onClick={() => setNoteType(type)}
+              >
+                {NOTE_TYPE_CONFIG[type].icon}
+              </Button>
+            ))}
+          </div>
+          <Input
+            placeholder="Add a note…"
+            className="h-12"
+            value={noteContent}
+            onChange={(e) => setNoteContent(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleAddNote()}
+          />
+          <Button onClick={handleAddNote} disabled={!noteContent.trim()}>
+            Save Note
+          </Button>
+        </div>
       </section>
 
       <section className="rounded-lg border border-border bg-card p-4 shadow-card">
@@ -222,12 +414,21 @@ export default function UnitDetailPage({
                     />
                   )}
                 </Link>
-                {lead.phone && <CallButton phone={lead.phone} className="w-full" />}
+                {lead.phone && (
+                  <Button asChild variant="outline" size="sm" className="w-full">
+                    <a href={`tel:${phoneToTel(lead.phone)}`}>
+                      <Phone data-icon="inline-start" />
+                      Call
+                    </a>
+                  </Button>
+                )}
               </div>
             ))}
           </div>
         )}
       </section>
+
+      <UnitForm open={editOpen} onOpenChange={setEditOpen} unit={unit} />
     </div>
   );
 }
