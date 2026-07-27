@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Building2, CalendarDays, CheckSquare, Settings, Users } from "lucide-react";
+import { Building2, CalendarDays, CheckSquare, FolderKanban, Settings, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const tabs = [
   { href: "/leads", label: "Leads", icon: Users },
   { href: "/inventory", label: "Inventory", icon: Building2 },
+  { href: "/projects", label: "Projects", icon: FolderKanban },
   { href: "/calendar", label: "Calendar", icon: CalendarDays },
   { href: "/tasks", label: "Tasks", icon: CheckSquare },
   { href: "/settings", label: "Settings", icon: Settings },
@@ -15,6 +16,10 @@ const tabs = [
 
 export function BottomNav() {
   const pathname = usePathname();
+
+  if (pathname.startsWith("/share")) {
+    return null;
+  }
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-card safe-bottom">

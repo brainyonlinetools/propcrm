@@ -1,9 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
-import { GripVertical, Moon, Plus, Sun, Trash2 } from "lucide-react";
+import { FolderKanban, GripVertical, Moon, Plus, Sun, Trash2 } from "lucide-react";
 import {
   DndContext,
   PointerSensor,
@@ -57,12 +58,6 @@ import {
   useReorderPipelineStages,
   useUpdatePipelineStage,
 } from "@/lib/queries/pipelineStages";
-import {
-  useCreateProject,
-  useDeleteProject,
-  useProjects,
-  useUpdateProject,
-} from "@/lib/queries/projects";
 import {
   useCreateWhatsAppTemplate,
   useDeleteWhatsAppTemplate,
@@ -151,7 +146,7 @@ export default function SettingsPage() {
 
         <TabsContent value="pipeline" className="mt-4 flex flex-col gap-6">
           <PipelineManager />
-          <ProjectsManager />
+          <ProjectsLinkCard />
           <section className="rounded-lg border border-border bg-card p-4 shadow-card">
             <h2 className="mb-3 text-sm font-semibold">Agent Name</h2>
             <p className="mb-3 text-xs text-muted-foreground">
@@ -522,104 +517,21 @@ function SortableStageRow({
   );
 }
 
-function ProjectsManager() {
-  const { data: projects = [] } = useProjects();
-  const createProject = useCreateProject();
-  const updateProject = useUpdateProject();
-  const deleteProject = useDeleteProject();
-  const [name, setName] = useState("");
-  const [location, setLocation] = useState("");
-
-  async function handleAdd() {
-    if (!name.trim()) return;
-    try {
-      await createProject.mutateAsync({ name: name.trim(), location: location.trim() || null });
-      setName("");
-      setLocation("");
-      toast.success("Project added");
-    } catch {
-      toast.error("Failed to add project");
-    }
-  }
-
+function ProjectsLinkCard() {
   return (
     <section className="rounded-lg border border-border bg-card p-4 shadow-card">
-      <h2 className="mb-3 text-sm font-semibold">Projects</h2>
-      <div className="flex flex-col gap-2">
-        {projects.map((project) => (
-          <div
-            key={project.id}
-            className="flex flex-col gap-2 rounded-md border border-border p-2 sm:flex-row sm:items-start"
-          >
-            <div className="min-w-0 flex-1">
-              <Input
-                className="h-9"
-                defaultValue={project.name}
-                onBlur={(e) => {
-                  if (e.target.value !== project.name) {
-                    updateProject.mutate({ id: project.id, name: e.target.value });
-                  }
-                }}
-              />
-              <Input
-                className="mt-1 h-9"
-                placeholder="Location"
-                defaultValue={project.location ?? ""}
-                onBlur={(e) => {
-                  if (e.target.value !== (project.location ?? "")) {
-                    updateProject.mutate({ id: project.id, location: e.target.value || null });
-                  }
-                }}
-              />
-            </div>
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="ghost" size="icon-sm">
-                  <Trash2 className="text-destructive" />
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Delete project?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    Leads and units referencing this project may be affected.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction
-                    onClick={async () => {
-                      try {
-                        await deleteProject.mutateAsync(project.id);
-                        toast.success("Project deleted");
-                      } catch {
-                        toast.error("Failed to delete project");
-                      }
-                    }}
-                  >
-                    Delete
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          </div>
-        ))}
-      </div>
-      <div className="mt-3 flex flex-col gap-2">
-        <Input
-          className="h-12"
-          placeholder="Project name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-        <Input
-          className="h-12"
-          placeholder="Location"
-          value={location}
-          onChange={(e) => setLocation(e.target.value)}
-        />
-        <Button onClick={handleAdd} disabled={!name.trim()}>
-          Add Project
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <h2 className="text-sm font-semibold">Projects</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Manage project details, photos, videos, and sharing from the Projects page.
+          </p>
+        </div>
+        <Button asChild variant="outline" size="sm">
+          <Link href="/projects">
+            <FolderKanban data-icon="inline-start" />
+            Open
+          </Link>
         </Button>
       </div>
     </section>

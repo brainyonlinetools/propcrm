@@ -1,4 +1,4 @@
-export type EntityType = "lead" | "inventory";
+export type EntityType = "lead" | "inventory" | "project";
 
 export type FieldType =
   | "text"
@@ -35,11 +35,55 @@ export interface PipelineStage {
   sort_order: number;
 }
 
+export type ProjectStatus =
+  | "upcoming"
+  | "under_construction"
+  | "ready_to_move"
+  | "completed";
+
 export interface Project {
   id: string;
   name: string;
   location: string | null;
+  region: string | null;
+  status: ProjectStatus | null;
+  land_area: string | null;
+  total_towers: string | null;
+  sizes: string | null;
+  usps: string | null;
   created_at: string;
+  updated_at: string;
+  project_media?: ProjectMedia[];
+}
+
+export const PROJECT_STATUS_OPTIONS: { value: ProjectStatus; label: string }[] = [
+  { value: "upcoming", label: "Upcoming" },
+  { value: "under_construction", label: "Under Construction" },
+  { value: "ready_to_move", label: "Ready to Move" },
+  { value: "completed", label: "Completed" },
+];
+
+export const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
+  upcoming: "Upcoming",
+  under_construction: "Under Construction",
+  ready_to_move: "Ready to Move",
+  completed: "Completed",
+};
+
+export type ProjectMediaType = "image" | "video";
+
+export interface ProjectMedia {
+  id: string;
+  project_id: string;
+  storage_path: string;
+  media_type: ProjectMediaType;
+  mime_type: string;
+  file_size: number | null;
+  caption: string | null;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+  public_url?: string;
 }
 
 export interface WhatsAppTemplate {
@@ -129,6 +173,27 @@ export interface InventoryInsert {
   status?: InventoryStatus;
   acquired_date?: string | null;
   custom_data?: Record<string, unknown>;
+}
+
+export interface ProjectInsert {
+  name: string;
+  location?: string | null;
+  region?: string | null;
+  status?: ProjectStatus | null;
+  land_area?: string | null;
+  total_towers?: string | null;
+  sizes?: string | null;
+  usps?: string | null;
+}
+
+export interface ProjectMediaInsert {
+  project_id: string;
+  storage_path: string;
+  media_type: ProjectMediaType;
+  mime_type: string;
+  file_size?: number | null;
+  caption?: string | null;
+  sort_order?: number;
 }
 
 export const DISQUALIFIED_STAGE_LABEL = "Disqualified";
