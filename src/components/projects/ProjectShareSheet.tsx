@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Copy, Loader2, Share2 } from "lucide-react";
+import { Copy, Loader2, MessageCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/sheet";
 import {
   buildProjectShareText,
+  copyTextToClipboard,
   countProjectMedia,
   getProjectMediaUrls,
   getProjectShareUrl,
@@ -43,7 +44,7 @@ export function ProjectShareSheet({
         projects,
         shareUrl,
         includeLink: true,
-        includeMediaUrls: false,
+        includeMediaUrls: true,
       }),
     [projects, shareUrl]
   );
@@ -53,22 +54,27 @@ export function ProjectShareSheet({
     try {
       const result = await shareProjects({ projects });
 
-      if (result === "native") {
-        toast.success("Shared project details and photos");
-      } else if (result === "native-files") {
-        toast.success("Photos shared — project details copied to clipboard");
-      } else if (mediaCount > 0) {
-        toast.success("Opened WhatsApp with project details and photo links");
+      if (result === "whatsapp-with-photos") {
+        toast.success("WhatsApp opened with project details — attach photos from the share sheet");
       } else {
-        toast.success("Opened WhatsApp with project details");
+        toast.success("WhatsApp opened with project details and photo links");
       }
 
       onOpenChange(false);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
-      toast.error("Could not share this project");
+      toast.error("Could not open WhatsApp — try copying the message instead");
     } finally {
       setIsSharing(false);
+    }
+  }
+
+  async function copyMessage() {
+    const copied = await copyTextToClipboard(message);
+    if (copied) {
+      toast.success("Message copied — paste it in WhatsApp");
+    } else {
+      toast.error("Could not copy message");
     }
   }
 
@@ -87,7 +93,7 @@ export function ProjectShareSheet({
         <SheetHeader className="px-0">
           <SheetTitle>Share Project</SheetTitle>
           <SheetDescription>
-            Share project details and {mediaCount > 0 ? `${mediaCount} photo${mediaCount === 1 ? "" : "s"}` : "brochure link"} with your client.
+            Opens WhatsApp with project details{mediaCount > 0 ? ` and ${mediaCount} photo link${mediaCount === 1 ? "" : "s"}` : ""}.
           </SheetDescription>
         </SheetHeader>
 
@@ -113,7 +119,7 @@ export function ProjectShareSheet({
           ) : null}
 
           <div className="rounded-lg border border-border bg-muted/40 p-3">
-            <p className="mb-2 text-xs font-medium text-muted-foreground">Message Preview</p>
+            <p className="mb-2 text-xs font-medium text-muted-foreground">WhatsApp Message</p>
             <pre className="max-h-60 overflow-y-auto whitespace-pre-wrap break-words text-sm font-sans">
               {message}
             </pre>
@@ -124,9 +130,13 @@ export function ProjectShareSheet({
               {isSharing ? (
                 <Loader2 data-icon="inline-start" className="animate-spin" />
               ) : (
-                <Share2 data-icon="inline-start" />
+                <MessageCircle data-icon="inline-start" />
               )}
-              {isSharing ? "Preparing..." : "Share"}
+              {isSharing ? "Opening WhatsApp..." : "Share via WhatsApp"}
+            </Button>
+            <Button type="button" variant="outline" size="lg" onClick={copyMessage}>
+              <Copy data-icon="inline-start" />
+              Copy Message
             </Button>
             <Button type="button" variant="ghost" size="lg" onClick={copyLink}>
               <Copy data-icon="inline-start" />

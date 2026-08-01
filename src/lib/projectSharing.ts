@@ -24,6 +24,10 @@ export function getWhatsAppShareUrl(message: string): string {
   return `https://wa.me/?text=${encodeURIComponent(message)}`;
 }
 
+export function getWhatsAppDeepLink(message: string): string {
+  return `whatsapp://send?text=${encodeURIComponent(message)}`;
+}
+
 export function parseProjectShareIds(ids: string | string[] | null | undefined): string[] {
   const raw = Array.isArray(ids) ? ids.join(",") : ids;
   if (!raw) return [];
@@ -128,7 +132,7 @@ function getShareableMimeType(media: ProjectMedia, blob: Blob): string {
   return media.media_type === "video" ? "video/mp4" : "image/jpeg";
 }
 
-async function downloadMediaBlob(media: ProjectMedia): Promise<Blob> {
+async function downloadMediaBlob(media: ProjectMedia): Promise<Blob | null> {
   if (media.storage_path) {
     const { data, error } = await supabase.storage
       .from(PROJECT_MEDIA_BUCKET)
@@ -136,16 +140,15 @@ async function downloadMediaBlob(media: ProjectMedia): Promise<Blob> {
     if (!error && data) return data;
   }
 
-  if (!media.public_url) {
-    throw new Error(`Could not download media ${media.storage_path || media.id}`);
-  }
+  if (!media.public_url) return null;
 
-  const response = await fetch(media.public_url, { mode: "cors", credentials: "omit" });
-  if (!response.ok) {
-    throw new Error(`Could not download ${media.public_url}`);
+  try {
+    const response = await fetch(media.public_url, { mode: "cors", credentials: "omit" });
+    if (!response.ok) return null;
+    return response.blob();
+  } catch {
+    return null;
   }
-
-  return response.blob();
 }
 
 export async function fetchProjectMediaFiles(projects: Project[]): Promise<File[]> {
@@ -160,6 +163,8 @@ export async function fetchProjectMediaFiles(projects: Project[]): Promise<File[
       tasks.push(
         (async () => {
           const blob = await downloadMediaBlob(media);
+          if (!blob) return null;
+
           const fileName = getProjectMediaFileName(media, project.name, index);
           const type = getShareableMimeType(media, blob);
           return new File([blob], fileName, { type, lastModified: Date.now() });
@@ -168,8 +173,8 @@ export async function fetchProjectMediaFiles(projects: Project[]): Promise<File[
     }
   }
 
-  const files = await Promise.all(tasks);
-  return files.filter((file): file is File => file !== null);
+  const results = await Promise.all(tasks);
+  return results.filter((file): file is File => file !== null);
 }
 
 export function getShareableImageFiles(files: File[]): File[] {
@@ -190,27 +195,37 @@ export function canShareProjectMediaFiles(files: File[]): boolean {
   }
 }
 
-function canSharePayload(payload: ShareData): boolean {
-  if (typeof navigator === "undefined" || !navigator.share || !navigator.canShare) {
-    return false;
-  }
-
-  try {
-    return navigator.canShare(payload);
-  } catch {
-    return false;
-  }
-}
-
 function getShareTitle(projects: Project[]): string {
   return projects.length === 1 ? projects[0].name : `${projects.length} project options`;
 }
 
-function openWhatsAppWithMessage(message: string): void {
-  window.open(getWhatsAppShareUrl(message), "_blank", "noopener,noreferrer");
+function isMobileDevice(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 }
 
-async function copyTextToClipboard(text: string): Promise<boolean> {
+export function openWhatsAppWithMessage(message: string): void {
+  const urls = isMobileDevice()
+    ? [getWhatsAppDeepLink(message), getWhatsAppShareUrl(message)]
+    : [getWhatsAppShareUrl(message)];
+
+  for (const url of urls) {
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.target = "_blank";
+    anchor.rel = "noopener noreferrer";
+    document.body.appendChild(anchor);
+    anchor.click();
+    if (typeof anchor.remove === "function") {
+      anchor.remove();
+    } else {
+      anchor.parentNode?.removeChild(anchor);
+    }
+    return;
+  }
+}
+
+export async function copyTextToClipboard(text: string): Promise<boolean> {
   if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
     return false;
   }
@@ -223,7 +238,7 @@ async function copyTextToClipboard(text: string): Promise<boolean> {
   }
 }
 
-export type ProjectShareResult = "native" | "native-files" | "whatsapp";
+export type ProjectShareResult = "whatsapp" | "whatsapp-with-photos";
 
 export async function shareProjects({
   projects,
@@ -231,54 +246,36 @@ export async function shareProjects({
   projects: Project[];
 }): Promise<ProjectShareResult> {
   const shareUrl = getProjectShareUrl(projects.map((project) => project.id));
-  const mediaCount = countProjectMedia(projects);
-  const files = mediaCount > 0 ? await fetchProjectMediaFiles(projects) : [];
-  const imageFiles = getShareableImageFiles(files);
-  const shareableFiles = imageFiles.length > 0 ? imageFiles : files;
-  const messageWithLinks = buildProjectShareText({
+  const message = buildProjectShareText({
     projects,
     shareUrl,
     includeLink: true,
     includeMediaUrls: true,
   });
-  const messageWithDetails = buildProjectShareText({
-    projects,
-    shareUrl,
-    includeLink: true,
-    includeMediaUrls: false,
-  });
-  const title = getShareTitle(projects);
 
-  if (typeof navigator !== "undefined" && navigator.share) {
-    const attempts: ShareData[] = [];
+  let shareableFiles: File[] = [];
+  try {
+    const files = await fetchProjectMediaFiles(projects);
+    const imageFiles = getShareableImageFiles(files);
+    shareableFiles = imageFiles.length > 0 ? imageFiles : files;
+  } catch {
+    shareableFiles = [];
+  }
 
-    if (shareableFiles.length > 0) {
-      attempts.push({ title, text: messageWithDetails, files: shareableFiles });
-      attempts.push({ title, files: shareableFiles });
-    }
+  openWhatsAppWithMessage(message);
 
-    attempts.push({ title, text: messageWithDetails, url: shareUrl });
-    attempts.push({ title, text: messageWithDetails });
-
-    for (const payload of attempts) {
-      if (!canSharePayload(payload)) continue;
-
-      try {
-        await navigator.share(payload);
-
-        if (payload.files?.length && !payload.text) {
-          await copyTextToClipboard(messageWithDetails);
-          return "native-files";
-        }
-
-        return "native";
-      } catch (error) {
-        if (error instanceof DOMException && error.name === "AbortError") throw error;
-      }
+  if (shareableFiles.length > 0 && canShareProjectMediaFiles(shareableFiles)) {
+    try {
+      await navigator.share({
+        files: shareableFiles,
+        title: getShareTitle(projects),
+      });
+      return "whatsapp-with-photos";
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") throw error;
     }
   }
 
-  openWhatsAppWithMessage(messageWithLinks);
   return "whatsapp";
 }
 
@@ -288,8 +285,8 @@ export async function shareProjectsToWhatsApp({
   projects: Project[];
 }): Promise<"native-files" | "whatsapp-url"> {
   const result = await shareProjects({ projects });
-  if (result === "whatsapp") return "whatsapp-url";
-  return "native-files";
+  if (result === "whatsapp-with-photos") return "native-files";
+  return "whatsapp-url";
 }
 
 export async function shareProjectsWithMedia({

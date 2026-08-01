@@ -9,10 +9,11 @@ import {
   getProjectSharePath,
   getProjectShareUrl,
   getShareableImageFiles,
+  getWhatsAppDeepLink,
   getWhatsAppShareUrl,
+  openWhatsAppWithMessage,
   parseProjectShareIds,
   shareProjects,
-  shareProjectsToWhatsApp,
 } from "@/lib/projectSharing";
 import type { Project, ProjectMedia } from "@/types";
 
@@ -164,6 +165,9 @@ describe("projectSharing", () => {
     const url = getWhatsAppShareUrl("Hello project buyer");
 
     expect(url).toBe("https://wa.me/?text=Hello%20project%20buyer");
+    expect(getWhatsAppDeepLink("Hello project buyer")).toBe(
+      "whatsapp://send?text=Hello%20project%20buyer"
+    );
   });
 
   it("parses comma separated project ids", () => {
@@ -259,11 +263,29 @@ describe("projectSharing", () => {
     expect(getShareableImageFiles(files)[0].name).toBe("photo.jpg");
   });
 
-  it("opens WhatsApp with media links when native sharing is unavailable", async () => {
+  it("opens WhatsApp with project details and photo links", async () => {
+    const clickMock = vi.fn();
     const openMock = vi.fn();
     vi.stubGlobal("window", {
       open: openMock,
       location: { origin: "https://crm.example" },
+    });
+    vi.stubGlobal("document", {
+      body: {
+        appendChild: vi.fn(),
+        removeChild: vi.fn(),
+      },
+      createElement: vi.fn(() => ({
+        href: "",
+        target: "",
+        rel: "",
+        click: clickMock,
+      })),
+    });
+    vi.stubGlobal("navigator", {
+      userAgent: "Mozilla/5.0",
+      share: undefined,
+      canShare: undefined,
     });
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
@@ -293,27 +315,62 @@ describe("projectSharing", () => {
     });
 
     expect(result).toBe("whatsapp");
-    expect(openMock).toHaveBeenCalledTimes(1);
-    const openedUrl = openMock.mock.calls[0][0] as string;
-    expect(openedUrl).toContain("https://wa.me/?text=");
-    expect(openedUrl).toContain(encodeURIComponent("https://example.com/photo.jpg"));
+    expect(clickMock).toHaveBeenCalledTimes(1);
   });
 
-  it("shares project details and photos together through the native share sheet", async () => {
-    const shareMock = vi.fn().mockResolvedValue(undefined);
-    vi.stubGlobal("navigator", {
-      share: shareMock,
-      canShare: vi.fn().mockReturnValue(true),
-      clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
+  it("builds a WhatsApp message with project details and media links", () => {
+    const message = buildProjectShareText({
+      projects: [
+        makeProject({
+          project_media: [
+            {
+              id: "media-1",
+              project_id: "project-1",
+              storage_path: "project-1/photo.jpg",
+              media_type: "image",
+              mime_type: "image/jpeg",
+              file_size: 1000,
+              caption: null,
+              sort_order: 0,
+              created_at: "2026-01-01T00:00:00Z",
+              updated_at: "2026-01-01T00:00:00Z",
+              public_url: "https://example.com/photo.jpg",
+            },
+          ],
+        }),
+      ],
+      shareUrl: "https://crm.example/share/projects?ids=project-1",
+      includeLink: true,
+      includeMediaUrls: true,
     });
+
+    expect(message).toContain("Anand Prime Residences");
+    expect(message).toContain("Location: Sector 62, Gurugram");
+    expect(message).toContain("https://example.com/photo.jpg");
+    expect(message).toContain("View details: https://crm.example/share/projects?ids=project-1");
+  });
+
+  it("still shares when media download fails", async () => {
+    const clickMock = vi.fn();
     vi.stubGlobal("window", {
       location: { origin: "https://crm.example" },
-      open: vi.fn(),
     });
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-      ok: true,
-      blob: async () => new Blob(["image-bytes"], { type: "image/jpeg" }),
-    }));
+    vi.stubGlobal("document", {
+      body: {
+        appendChild: vi.fn(),
+        removeChild: vi.fn(),
+      },
+      createElement: vi.fn(() => ({
+        href: "",
+        target: "",
+        rel: "",
+        click: clickMock,
+      })),
+    });
+    vi.stubGlobal("navigator", {
+      userAgent: "Mozilla/5.0",
+    });
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network error")));
 
     const result = await shareProjects({
       projects: [
@@ -337,11 +394,8 @@ describe("projectSharing", () => {
       ],
     });
 
-    expect(result).toBe("native");
-    expect(shareMock).toHaveBeenCalledTimes(1);
-    const payload = shareMock.mock.calls[0][0] as ShareData;
-    expect(payload.text).toContain("Anand Prime Residences");
-    expect(payload.files).toHaveLength(1);
+    expect(result).toBe("whatsapp");
+    expect(clickMock).toHaveBeenCalledTimes(1);
   });
 });
 
