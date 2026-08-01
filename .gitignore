@@ -39,5 +39,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# supabase
-.supabase
+# Serwist
+public/sw.js
+public/swe-worker-*.js
+
