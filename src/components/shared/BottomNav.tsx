@@ -17,7 +17,7 @@ const tabs = [
 export function BottomNav() {
   const pathname = usePathname();
 
-  if (pathname.startsWith("/share")) {
+  if (pathname.startsWith("/share") || pathname.startsWith("/~offline")) {
     return null;
   }
 
