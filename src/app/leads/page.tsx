@@ -13,16 +13,24 @@ import { BatchStageChangeSheet } from "@/components/leads/BatchStageChangeSheet"
 import { BatchWhatsAppSheet } from "@/components/leads/BatchWhatsAppSheet";
 import { BulkImportSheet } from "@/components/shared/BulkImportSheet";
 import { CollapsibleFilterSection } from "@/components/shared/CollapsibleFilterSection";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PullToRefresh } from "@/components/shared/PullToRefresh";
-import { leadsKey, useLeads } from "@/lib/queries/leads";
+import { leadsKey, qualifiedLeadsKey, useLeads, useQualifiedLeads } from "@/lib/queries/leads";
 import { usePipelineStages } from "@/lib/queries/pipelineStages";
 import { cn } from "@/lib/utils";
-import { DISQUALIFIED_STAGE_LABEL, isArchivedLead } from "@/types";
+import {
+  DISQUALIFIED_STAGE_LABEL,
+  QUALIFIED_STAGE_LABEL,
+  isArchivedLead,
+  isQualifiedLead,
+} from "@/types";
 
 type ViewMode = "list" | "kanban";
 type LeadViewFilter = "active" | "archived";
+type LeadTab = "all" | "qualified";
 
 export default function LeadsPage() {
+  const [leadTab, setLeadTab] = useState<LeadTab>("all");
   const [view, setView] = useState<ViewMode>("list");
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState<string | null>(null);
@@ -39,31 +47,45 @@ export default function LeadsPage() {
   const queryClient = useQueryClient();
 
   const { data: leads = [], isLoading, isError } = useLeads();
+  const {
+    data: qualifiedLeads = [],
+    isLoading: isQualifiedLoading,
+    isError: isQualifiedError,
+  } = useQualifiedLeads();
   const { data: stages = [] } = usePipelineStages();
 
+  const sourceLeads = leadTab === "qualified" ? qualifiedLeads : leads;
+  const listLoading = leadTab === "qualified" ? isQualifiedLoading : isLoading;
+  const listError = leadTab === "qualified" ? isQualifiedError : isError;
+
   const sources = useMemo(
-    () => [...new Set(leads.map((l) => l.source).filter(Boolean))] as string[],
-    [leads]
+    () => [...new Set(sourceLeads.map((l) => l.source).filter(Boolean))] as string[],
+    [sourceLeads]
   );
 
   const projectInterests = useMemo(
-    () => [...new Set(leads.map((l) => l.project_interest).filter(Boolean))] as string[],
-    [leads]
+    () =>
+      [...new Set(sourceLeads.map((l) => l.project_interest).filter(Boolean))] as string[],
+    [sourceLeads]
   );
 
-  const visibleStages = useMemo(
-    () =>
-      viewFilter === "archived"
-        ? stages
-        : stages.filter((s) => s.label !== DISQUALIFIED_STAGE_LABEL),
-    [stages, viewFilter]
-  );
+  const visibleStages = useMemo(() => {
+    if (leadTab === "qualified") return [];
+    return viewFilter === "archived"
+      ? stages
+      : stages.filter(
+          (s) => s.label !== DISQUALIFIED_STAGE_LABEL && s.label !== QUALIFIED_STAGE_LABEL
+        );
+  }, [stages, viewFilter, leadTab]);
 
   const filtered = useMemo(() => {
-    return leads.filter((lead) => {
-      const archived = isArchivedLead(lead);
-      if (viewFilter === "active" && archived) return false;
-      if (viewFilter === "archived" && !archived) return false;
+    return sourceLeads.filter((lead) => {
+      if (leadTab === "all") {
+        const archived = isArchivedLead(lead);
+        if (viewFilter === "active" && archived) return false;
+        if (viewFilter === "archived" && !archived) return false;
+        if (viewFilter === "active" && isQualifiedLead(lead)) return false;
+      }
 
       const q = search.toLowerCase();
       const matchesSearch =
@@ -77,7 +99,15 @@ export default function LeadsPage() {
         !projectFilter || lead.project_interest === projectFilter;
       return matchesSearch && matchesStage && matchesSource && matchesProject;
     });
-  }, [leads, search, stageFilter, sourceFilter, projectFilter, viewFilter]);
+  }, [
+    sourceLeads,
+    search,
+    stageFilter,
+    sourceFilter,
+    projectFilter,
+    viewFilter,
+    leadTab,
+  ]);
 
   const activeFilterCount = [
     viewFilter !== "active" ? viewFilter : null,
@@ -96,7 +126,22 @@ export default function LeadsPage() {
   }
 
   async function handleRefresh() {
-    await queryClient.invalidateQueries({ queryKey: leadsKey });
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: leadsKey }),
+      queryClient.invalidateQueries({ queryKey: qualifiedLeadsKey }),
+    ]);
+  }
+
+  function handleLeadTabChange(value: string) {
+    const nextTab = value as LeadTab;
+    setLeadTab(nextTab);
+    if (nextTab === "qualified") {
+      setView("list");
+      setViewFilter("active");
+      setStageFilter(null);
+      setSelectionMode(false);
+      setSelectedIds(new Set());
+    }
   }
 
   function toggleSelectionMode() {
@@ -144,6 +189,7 @@ export default function LeadsPage() {
               variant={selectionMode ? "secondary" : "ghost"}
               size="icon"
               onClick={toggleSelectionMode}
+              disabled={leadTab === "qualified"}
               aria-label={selectionMode ? "Exit selection mode" : "Select leads for bulk actions"}
             >
               <CheckSquare />
@@ -168,12 +214,27 @@ export default function LeadsPage() {
               variant={view === "kanban" ? "secondary" : "ghost"}
               size="icon"
               onClick={() => setView("kanban")}
+              disabled={leadTab === "qualified"}
               aria-label="Kanban view"
             >
               <LayoutGrid />
             </Button>
           </div>
         </div>
+
+        <Tabs value={leadTab} onValueChange={handleLeadTabChange} className="mt-3">
+          <TabsList className="grid h-10 w-full grid-cols-2">
+            <TabsTrigger value="all">All</TabsTrigger>
+            <TabsTrigger value="qualified">
+              Qualified
+              {qualifiedLeads.length > 0 && (
+                <span className="ml-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                  {qualifiedLeads.length}
+                </span>
+              )}
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
 
         <div className="relative mt-3">
           <Search className="absolute top-1/2 left-3 -translate-y-1/2 text-muted-foreground" />
@@ -223,42 +284,46 @@ export default function LeadsPage() {
                 </div>
               )}
 
-              <CollapsibleFilterSection
-                title="View"
-                summary={viewFilter === "archived" ? "Archived" : "Active"}
-                hasActiveFilter={viewFilter !== "active"}
-              >
-                <FilterChip
-                  label="Active"
-                  active={viewFilter === "active"}
-                  onClick={() => setViewFilter("active")}
-                />
-                <FilterChip
-                  label="Archived"
-                  active={viewFilter === "archived"}
-                  onClick={() => setViewFilter("archived")}
-                />
-              </CollapsibleFilterSection>
-
-              <CollapsibleFilterSection
-                title="Stage"
-                summary={activeStageLabel ?? "All stages"}
-                hasActiveFilter={Boolean(stageFilter)}
-              >
-                <FilterChip
-                  label="All stages"
-                  active={!stageFilter}
-                  onClick={() => setStageFilter(null)}
-                />
-                {visibleStages.map((s) => (
+              {leadTab === "all" && (
+                <CollapsibleFilterSection
+                  title="View"
+                  summary={viewFilter === "archived" ? "Archived" : "Active"}
+                  hasActiveFilter={viewFilter !== "active"}
+                >
                   <FilterChip
-                    key={s.id}
-                    label={s.label}
-                    active={stageFilter === s.id}
-                    onClick={() => setStageFilter(stageFilter === s.id ? null : s.id)}
+                    label="Active"
+                    active={viewFilter === "active"}
+                    onClick={() => setViewFilter("active")}
                   />
-                ))}
-              </CollapsibleFilterSection>
+                  <FilterChip
+                    label="Archived"
+                    active={viewFilter === "archived"}
+                    onClick={() => setViewFilter("archived")}
+                  />
+                </CollapsibleFilterSection>
+              )}
+
+              {leadTab === "all" && (
+                <CollapsibleFilterSection
+                  title="Stage"
+                  summary={activeStageLabel ?? "All stages"}
+                  hasActiveFilter={Boolean(stageFilter)}
+                >
+                  <FilterChip
+                    label="All stages"
+                    active={!stageFilter}
+                    onClick={() => setStageFilter(null)}
+                  />
+                  {visibleStages.map((s) => (
+                    <FilterChip
+                      key={s.id}
+                      label={s.label}
+                      active={stageFilter === s.id}
+                      onClick={() => setStageFilter(stageFilter === s.id ? null : s.id)}
+                    />
+                  ))}
+                </CollapsibleFilterSection>
+              )}
 
               <CollapsibleFilterSection
                 title="Source"
@@ -307,13 +372,13 @@ export default function LeadsPage() {
       </header>
 
       <PullToRefresh onRefresh={handleRefresh} className="flex-1 px-4 py-4">
-        {isLoading ? (
+        {listLoading ? (
           <div className="flex flex-col gap-3">
             {Array.from({ length: 4 }).map((_, i) => (
               <Skeleton key={i} className="h-28 w-full rounded-lg" />
             ))}
           </div>
-        ) : isError ? (
+        ) : listError ? (
           <EmptyState
             title="Could not load leads"
             description="Check your Supabase connection and run the migration in supabase/migrations/001_initial_schema.sql"
@@ -323,23 +388,29 @@ export default function LeadsPage() {
         ) : filtered.length === 0 ? (
           <EmptyState
             title={
-              leads.length === 0
-                ? "No leads yet"
-                : viewFilter === "archived"
-                  ? "No archived leads"
-                  : "No matching leads"
+              leadTab === "qualified"
+                ? "No qualified leads"
+                : sourceLeads.length === 0
+                  ? "No leads yet"
+                  : viewFilter === "archived"
+                    ? "No archived leads"
+                    : "No matching leads"
             }
             description={
-              leads.length === 0
-                ? "Add your first enquiry from Golf Course Road, DLF, or Sector 62 walk-ins."
-                : viewFilter === "archived"
-                  ? "Leads marked as Disqualified appear here."
-                  : "Try adjusting your search or filters."
+              leadTab === "qualified"
+                ? "Leads marked as Qualified appear here, sorted by recent activity."
+                : sourceLeads.length === 0
+                  ? "Add your first enquiry from Golf Course Road, DLF, or Sector 62 walk-ins."
+                  : viewFilter === "archived"
+                    ? "Leads marked as Disqualified appear here."
+                    : "Try adjusting your search or filters."
             }
-            actionLabel={leads.length === 0 ? "Add Lead" : undefined}
-            onAction={leads.length === 0 ? () => setFormOpen(true) : undefined}
+            actionLabel={sourceLeads.length === 0 && leadTab === "all" ? "Add Lead" : undefined}
+            onAction={
+              sourceLeads.length === 0 && leadTab === "all" ? () => setFormOpen(true) : undefined
+            }
           />
-        ) : view === "list" ? (
+        ) : view === "list" || leadTab === "qualified" ? (
           <div className="flex flex-col gap-3">
             {filtered.map((lead) => (
               <LeadCard
@@ -348,6 +419,7 @@ export default function LeadsPage() {
                 selectionMode={selectionMode}
                 selected={selectedIds.has(lead.id)}
                 onToggleSelect={toggleLeadSelection}
+                showLastActivity={leadTab === "qualified"}
               />
             ))}
           </div>
