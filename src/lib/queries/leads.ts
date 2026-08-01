@@ -2,8 +2,10 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import type { Json } from "@/types/database";
 import type { Lead, LeadInsert } from "@/types";
+import { QUALIFIED_STAGE_LABEL } from "@/types";
 
 export const leadsKey = ["leads"] as const;
+export const qualifiedLeadsKey = ["leads", "qualified"] as const;
 export const leadKey = (id: string) => ["leads", id] as const;
 
 export function useLeads() {
@@ -20,6 +22,40 @@ export function useLeads() {
         )
         .order("acquired_date", { ascending: false, nullsFirst: false })
         .order("created_at", { ascending: false });
+      if (error) throw error;
+      return (data ?? []).map((row) => {
+        const lead = row as Lead & { custom_data: unknown };
+        return {
+          ...lead,
+          custom_data: (lead.custom_data as Record<string, unknown>) ?? {},
+        };
+      });
+    },
+  });
+}
+
+export function useQualifiedLeads() {
+  return useQuery({
+    queryKey: qualifiedLeadsKey,
+    queryFn: async () => {
+      const { data: stage, error: stageError } = await supabase
+        .from("pipeline_stages")
+        .select("id")
+        .eq("label", QUALIFIED_STAGE_LABEL)
+        .maybeSingle();
+      if (stageError) throw stageError;
+      if (!stage) return [] as Lead[];
+
+      const { data, error } = await supabase
+        .from("leads")
+        .select(
+          `
+          *,
+          pipeline_stages(id, label, color, sort_order)
+        `
+        )
+        .eq("stage_id", stage.id)
+        .order("updated_at", { ascending: false });
       if (error) throw error;
       return (data ?? []).map((row) => {
         const lead = row as Lead & { custom_data: unknown };
@@ -95,6 +131,7 @@ export function useCreateLead() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: leadsKey });
+      queryClient.invalidateQueries({ queryKey: qualifiedLeadsKey });
     },
   });
 }
@@ -117,6 +154,7 @@ export function useBulkCreateLeads() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: leadsKey });
+      queryClient.invalidateQueries({ queryKey: qualifiedLeadsKey });
     },
   });
 }
@@ -143,6 +181,7 @@ export function useUpdateLead() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: leadsKey });
+      queryClient.invalidateQueries({ queryKey: qualifiedLeadsKey });
       queryClient.invalidateQueries({ queryKey: leadKey(data.id) });
     },
   });
@@ -179,6 +218,7 @@ export function useUpdateLeadStage() {
     },
     onSettled: (_data, _err, vars) => {
       queryClient.invalidateQueries({ queryKey: leadsKey });
+      queryClient.invalidateQueries({ queryKey: qualifiedLeadsKey });
       queryClient.invalidateQueries({ queryKey: leadKey(vars.id) });
     },
   });
@@ -196,6 +236,7 @@ export function useBulkUpdateLeadStage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: leadsKey });
+      queryClient.invalidateQueries({ queryKey: qualifiedLeadsKey });
     },
   });
 }
@@ -209,6 +250,7 @@ export function useDeleteLead() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: leadsKey });
+      queryClient.invalidateQueries({ queryKey: qualifiedLeadsKey });
     },
   });
 }
