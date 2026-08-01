@@ -1,3 +1,5 @@
+import { PROJECT_MEDIA_BUCKET } from "@/lib/queries/projects";
+import { supabase } from "@/lib/supabase";
 import {
   PROJECT_STATUS_LABELS,
   type Project,
@@ -126,6 +128,26 @@ function getShareableMimeType(media: ProjectMedia, blob: Blob): string {
   return media.media_type === "video" ? "video/mp4" : "image/jpeg";
 }
 
+async function downloadMediaBlob(media: ProjectMedia): Promise<Blob> {
+  if (media.storage_path) {
+    const { data, error } = await supabase.storage
+      .from(PROJECT_MEDIA_BUCKET)
+      .download(media.storage_path);
+    if (!error && data) return data;
+  }
+
+  if (!media.public_url) {
+    throw new Error(`Could not download media ${media.storage_path || media.id}`);
+  }
+
+  const response = await fetch(media.public_url, { mode: "cors", credentials: "omit" });
+  if (!response.ok) {
+    throw new Error(`Could not download ${media.public_url}`);
+  }
+
+  return response.blob();
+}
+
 export async function fetchProjectMediaFiles(projects: Project[]): Promise<File[]> {
   const tasks: Promise<File | null>[] = [];
 
@@ -133,17 +155,11 @@ export async function fetchProjectMediaFiles(projects: Project[]): Promise<File[
     const mediaItems = project.project_media ?? [];
     for (let index = 0; index < mediaItems.length; index++) {
       const media = mediaItems[index];
-      const url = media.public_url;
-      if (!url) continue;
+      if (!media.storage_path && !media.public_url) continue;
 
       tasks.push(
         (async () => {
-          const response = await fetch(url, { mode: "cors", credentials: "omit" });
-          if (!response.ok) {
-            throw new Error(`Could not download ${getProjectMediaFileName(media, project.name, index)}`);
-          }
-
-          const blob = await response.blob();
+          const blob = await downloadMediaBlob(media);
           const fileName = getProjectMediaFileName(media, project.name, index);
           const type = getShareableMimeType(media, blob);
           return new File([blob], fileName, { type, lastModified: Date.now() });
@@ -174,41 +190,106 @@ export function canShareProjectMediaFiles(files: File[]): boolean {
   }
 }
 
+function canSharePayload(payload: ShareData): boolean {
+  if (typeof navigator === "undefined" || !navigator.share || !navigator.canShare) {
+    return false;
+  }
+
+  try {
+    return navigator.canShare(payload);
+  } catch {
+    return false;
+  }
+}
+
+function getShareTitle(projects: Project[]): string {
+  return projects.length === 1 ? projects[0].name : `${projects.length} project options`;
+}
+
 function openWhatsAppWithMessage(message: string): void {
   window.open(getWhatsAppShareUrl(message), "_blank", "noopener,noreferrer");
 }
 
-export type WhatsAppShareResult = "native-files" | "whatsapp-url";
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+    return false;
+  }
 
-export async function shareProjectsToWhatsApp({
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export type ProjectShareResult = "native" | "native-files" | "whatsapp";
+
+export async function shareProjects({
   projects,
 }: {
   projects: Project[];
-}): Promise<WhatsAppShareResult> {
+}): Promise<ProjectShareResult> {
   const shareUrl = getProjectShareUrl(projects.map((project) => project.id));
-  const message = buildProjectShareText({
+  const mediaCount = countProjectMedia(projects);
+  const files = mediaCount > 0 ? await fetchProjectMediaFiles(projects) : [];
+  const imageFiles = getShareableImageFiles(files);
+  const shareableFiles = imageFiles.length > 0 ? imageFiles : files;
+  const messageWithLinks = buildProjectShareText({
     projects,
     shareUrl,
     includeLink: true,
     includeMediaUrls: true,
   });
-  const files = await fetchProjectMediaFiles(projects);
-  const imageFiles = getShareableImageFiles(files);
-  const shareableFiles = imageFiles.length > 0 ? imageFiles : files;
+  const messageWithDetails = buildProjectShareText({
+    projects,
+    shareUrl,
+    includeLink: true,
+    includeMediaUrls: false,
+  });
+  const title = getShareTitle(projects);
 
-  if (shareableFiles.length > 0 && canShareProjectMediaFiles(shareableFiles)) {
-    try {
-      // WhatsApp often drops attachments when text is included in the same share payload.
-      await navigator.share({ files: shareableFiles });
-      openWhatsAppWithMessage(message);
-      return "native-files";
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") throw error;
+  if (typeof navigator !== "undefined" && navigator.share) {
+    const attempts: ShareData[] = [];
+
+    if (shareableFiles.length > 0) {
+      attempts.push({ title, text: messageWithDetails, files: shareableFiles });
+      attempts.push({ title, files: shareableFiles });
+    }
+
+    attempts.push({ title, text: messageWithDetails, url: shareUrl });
+    attempts.push({ title, text: messageWithDetails });
+
+    for (const payload of attempts) {
+      if (!canSharePayload(payload)) continue;
+
+      try {
+        await navigator.share(payload);
+
+        if (payload.files?.length && !payload.text) {
+          await copyTextToClipboard(messageWithDetails);
+          return "native-files";
+        }
+
+        return "native";
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") throw error;
+      }
     }
   }
 
-  openWhatsAppWithMessage(message);
-  return "whatsapp-url";
+  openWhatsAppWithMessage(messageWithLinks);
+  return "whatsapp";
+}
+
+export async function shareProjectsToWhatsApp({
+  projects,
+}: {
+  projects: Project[];
+}): Promise<"native-files" | "whatsapp-url"> {
+  const result = await shareProjects({ projects });
+  if (result === "whatsapp") return "whatsapp-url";
+  return "native-files";
 }
 
 export async function shareProjectsWithMedia({
@@ -218,7 +299,7 @@ export async function shareProjectsWithMedia({
   projects: Project[];
   title?: string;
 }): Promise<void> {
-  await shareProjectsToWhatsApp({ projects });
+  await shareProjects({ projects });
   void title;
 }
 
