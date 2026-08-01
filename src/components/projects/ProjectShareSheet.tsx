@@ -18,7 +18,7 @@ import {
   fetchProjectMediaFiles,
   getProjectShareUrl,
   getWhatsAppShareUrl,
-  shareProjectsWithMedia,
+  shareProjectsToWhatsApp,
 } from "@/lib/projectSharing";
 import type { Project } from "@/types";
 
@@ -38,24 +38,29 @@ export function ProjectShareSheet({
   const shareUrl = useMemo(() => getProjectShareUrl(projectIds), [projectIds]);
   const mediaCount = useMemo(() => countProjectMedia(projects), [projects]);
   const message = useMemo(
-    () => buildProjectShareText({ projects, includeLink: false }),
-    [projects]
+    () =>
+      buildProjectShareText({
+        projects,
+        shareUrl,
+        includeLink: true,
+        includeMediaUrls: mediaCount > 0,
+      }),
+    [projects, shareUrl, mediaCount]
   );
 
   async function shareViaWhatsApp() {
     setIsPreparing(true);
     try {
-      await shareProjectsWithMedia({ projects });
+      const result = await shareProjectsToWhatsApp({ projects });
+      if (result === "native-files") {
+        toast.success("Photos attached — WhatsApp opened with project details");
+      } else if (mediaCount > 0) {
+        toast.success("WhatsApp opened with project details and photo links");
+      } else {
+        toast.success("WhatsApp opened with project details");
+      }
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
-
-      if (error instanceof Error && error.message === "FILE_SHARE_UNSUPPORTED") {
-        toast.error(
-          "This device cannot attach files to WhatsApp from the browser. Download the media and attach it manually in WhatsApp."
-        );
-        return;
-      }
-
       toast.error("Could not prepare project media for sharing");
     } finally {
       setIsPreparing(false);
@@ -74,8 +79,7 @@ export function ProjectShareSheet({
       downloadProjectMediaFiles(files);
       toast.success(`Downloaded ${files.length} file${files.length === 1 ? "" : "s"}`);
 
-      const textOnlyMessage = buildProjectShareText({ projects, includeLink: false });
-      window.open(getWhatsAppShareUrl(textOnlyMessage), "_blank", "noopener,noreferrer");
+      window.open(getWhatsAppShareUrl(message), "_blank", "noopener,noreferrer");
     } catch {
       toast.error("Could not download project media");
     } finally {
@@ -112,7 +116,8 @@ export function ProjectShareSheet({
             </pre>
             {mediaCount > 0 ? (
               <p className="mt-3 text-xs text-muted-foreground">
-                {mediaCount} {mediaCount === 1 ? "file" : "files"} will be attached as images/videos.
+                On supported phones, photos are attached directly. Otherwise photo links are included
+                in the message.
               </p>
             ) : null}
           </div>

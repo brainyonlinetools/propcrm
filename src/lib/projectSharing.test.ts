@@ -5,10 +5,13 @@ import {
   countProjectMedia,
   fetchProjectMediaFiles,
   getProjectMediaFileName,
+  getProjectMediaUrls,
   getProjectSharePath,
   getProjectShareUrl,
+  getShareableImageFiles,
   getWhatsAppShareUrl,
   parseProjectShareIds,
+  shareProjectsToWhatsApp,
 } from "@/lib/projectSharing";
 import type { Project, ProjectMedia } from "@/types";
 
@@ -77,6 +80,58 @@ describe("projectSharing", () => {
 
     expect(message).not.toContain("View details:");
     expect(message).not.toContain("available in the link");
+  });
+
+  it("includes direct media URLs when requested", () => {
+    const message = buildProjectShareText({
+      projects: [
+        makeProject({
+          project_media: [
+            {
+              id: "media-1",
+              project_id: "project-1",
+              storage_path: "project-1/photo.jpg",
+              media_type: "image",
+              mime_type: "image/jpeg",
+              file_size: 1000,
+              caption: null,
+              sort_order: 0,
+              created_at: "2026-01-01T00:00:00Z",
+              updated_at: "2026-01-01T00:00:00Z",
+              public_url: "https://example.com/photo.jpg",
+            },
+          ],
+        }),
+      ],
+      includeMediaUrls: true,
+    });
+
+    expect(message).toContain("Photos & videos:");
+    expect(message).toContain("https://example.com/photo.jpg");
+  });
+
+  it("collects media URLs across projects", () => {
+    expect(
+      getProjectMediaUrls([
+        makeProject({
+          project_media: [
+            {
+              id: "media-1",
+              project_id: "project-1",
+              storage_path: "project-1/photo.jpg",
+              media_type: "image",
+              mime_type: "image/jpeg",
+              file_size: 1000,
+              caption: null,
+              sort_order: 0,
+              created_at: "2026-01-01T00:00:00Z",
+              updated_at: "2026-01-01T00:00:00Z",
+              public_url: "https://example.com/photo.jpg",
+            },
+          ],
+        }),
+      ])
+    ).toEqual(["https://example.com/photo.jpg"]);
   });
 
   it("builds a numbered multiple project message", () => {
@@ -184,13 +239,66 @@ describe("projectSharing", () => {
     expect(files).toHaveLength(1);
     expect(files[0].name).toBe("photo.jpg");
     expect(files[0].type).toBe("image/jpeg");
-    expect(fetchMock).toHaveBeenCalledWith("https://example.com/photo.jpg");
+    expect(fetchMock).toHaveBeenCalledWith("https://example.com/photo.jpg", {
+      mode: "cors",
+      credentials: "omit",
+    });
   });
 
   it("detects when file sharing is unsupported", () => {
     const files = [new File(["hello"], "photo.jpg", { type: "image/jpeg" })];
 
     expect(canShareProjectMediaFiles(files)).toBe(false);
+  });
+
+  it("filters image files for native sharing", () => {
+    const files = [
+      new File(["image"], "photo.jpg", { type: "image/jpeg" }),
+      new File(["video"], "clip.mp4", { type: "video/mp4" }),
+    ];
+
+    expect(getShareableImageFiles(files)).toHaveLength(1);
+    expect(getShareableImageFiles(files)[0].name).toBe("photo.jpg");
+  });
+
+  it("opens WhatsApp with media links when native file sharing is unavailable", async () => {
+    const openMock = vi.fn();
+    vi.stubGlobal("window", {
+      open: openMock,
+      location: { origin: "https://crm.example" },
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      blob: async () => new Blob(["image-bytes"], { type: "image/jpeg" }),
+    }));
+
+    const result = await shareProjectsToWhatsApp({
+      projects: [
+        makeProject({
+          project_media: [
+            {
+              id: "media-1",
+              project_id: "project-1",
+              storage_path: "project-1/photo.jpg",
+              media_type: "image",
+              mime_type: "image/jpeg",
+              file_size: 1000,
+              caption: null,
+              sort_order: 0,
+              created_at: "2026-01-01T00:00:00Z",
+              updated_at: "2026-01-01T00:00:00Z",
+              public_url: "https://example.com/photo.jpg",
+            },
+          ],
+        }),
+      ],
+    });
+
+    expect(result).toBe("whatsapp-url");
+    expect(openMock).toHaveBeenCalledTimes(1);
+    const openedUrl = openMock.mock.calls[0][0] as string;
+    expect(openedUrl).toContain("https://wa.me/?text=");
+    expect(openedUrl).toContain(encodeURIComponent("https://example.com/photo.jpg"));
   });
 });
 
