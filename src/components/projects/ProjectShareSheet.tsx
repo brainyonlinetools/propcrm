@@ -54,11 +54,15 @@ export function ProjectShareSheet({
       const result = await shareProjects({ projects });
 
       if (result === "whatsapp-with-photos") {
-        toast.success("Choose WhatsApp to send project details with attachments.");
-      } else {
         toast.success(
-          "WhatsApp opened with text only; attachments are not supported on this device/browser."
+          "Photos attached — paste project details from clipboard as the caption."
         );
+      } else if (mediaCount > 0) {
+        toast.success(
+          "WhatsApp opened with details only; attach downloaded photos if needed."
+        );
+      } else {
+        toast.success("WhatsApp opened with project details.");
       }
 
       onOpenChange(false);
@@ -95,7 +99,7 @@ export function ProjectShareSheet({
           <SheetTitle>Share Project</SheetTitle>
           <SheetDescription>
             {mediaCount > 0
-              ? `Share project details with ${mediaCount} photo${mediaCount === 1 ? "" : "s"} or video${mediaCount === 1 ? "" : "s"} as attachments.`
+              ? `Attach ${mediaCount} photo${mediaCount === 1 ? "" : "s"}/video${mediaCount === 1 ? "" : "s"} in WhatsApp, then paste the project details as the caption.`
               : "Share project details in WhatsApp."}
           </SheetDescription>
         </SheetHeader>
@@ -141,9 +145,9 @@ export function ProjectShareSheet({
               <Copy data-icon="inline-start" />
               Copy Message
             </Button>
-            <Button type="button" variant="ghost" size="lg" onClick={copyLink}>
+            <Button type="button" variant="ghost" size="sm" onClick={copyLink}>
               <Copy data-icon="inline-start" />
-              Copy Project Link
+              Copy brochure link
             </Button>
           </div>
         </div>

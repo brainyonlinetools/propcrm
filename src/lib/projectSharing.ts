@@ -240,6 +240,20 @@ export async function copyTextToClipboard(text: string): Promise<boolean> {
 
 export type ProjectShareResult = "whatsapp" | "whatsapp-with-photos";
 
+/** Prefer images when present; WhatsApp is more reliable with image-only shares. */
+export function getPreferredShareableFiles(files: File[]): File[] {
+  if (files.length === 0) return [];
+
+  const imageFiles = getShareableImageFiles(files);
+  if (imageFiles.length > 0 && canShareProjectMediaFiles(imageFiles)) {
+    return imageFiles;
+  }
+  if (canShareProjectMediaFiles(files)) {
+    return files;
+  }
+  return [];
+}
+
 export async function shareProjects({
   projects,
 }: {
@@ -258,17 +272,26 @@ export async function shareProjects({
     files = [];
   }
 
-  if (files.length > 0 && canShareProjectMediaFiles(files)) {
+  const shareableFiles = getPreferredShareableFiles(files);
+
+  // Copy details first so the user can paste them as a WhatsApp caption after
+  // attaching photos. Sharing text alongside files often drops attachments.
+  await copyTextToClipboard(message);
+
+  if (shareableFiles.length > 0) {
     try {
       await navigator.share({
-        files,
+        files: shareableFiles,
         title: getShareTitle(projects),
-        text: message,
       });
       return "whatsapp-with-photos";
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") throw error;
     }
+  }
+
+  if (files.length > 0) {
+    downloadProjectMediaFiles(files);
   }
 
   openWhatsAppWithMessage(message);
