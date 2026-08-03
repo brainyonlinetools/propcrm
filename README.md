@@ -79,7 +79,9 @@ When you add a follow-up task on a lead with a due date, you can optionally set 
    - `VAPID_PRIVATE_KEY`
    - `VAPID_SUBJECT` (e.g. `mailto:you@example.com`)
 4. On your phone: open the CRM, allow notifications when prompted, then **Add to Home Screen** (required on iOS for background push)
-5. Vercel Cron hits `/api/cron/task-reminders` every minute (Pro plan). On Hobby, use [cron-job.org](https://cron-job.org) to ping that URL every minute with `Authorization: Bearer <CRON_SECRET>`
+5. **Background reminders (when app is closed):** Vercel Hobby only allows **once-per-day** cron jobs, so minute-level reminders cannot use `vercel.json` crons. Options:
+   - **Hobby:** use [cron-job.org](https://cron-job.org) to call `GET https://your-app.vercel.app/api/cron/task-reminders` every minute with header `Authorization: Bearer <CRON_SECRET>`
+   - **Pro:** add a cron in `vercel.json` with schedule `* * * * *` for `/api/cron/task-reminders`
 
 When the app is open, reminders also fire via a client-side poller without waiting for cron.
 

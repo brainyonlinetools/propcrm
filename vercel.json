@@ -3,10 +3,6 @@
     {
       "path": "/api/cron/sync-sheet-status",
       "schedule": "30 17 * * *"
-    },
-    {
-      "path": "/api/cron/task-reminders",
-      "schedule": "* * * * *"
     }
   ]
 }
