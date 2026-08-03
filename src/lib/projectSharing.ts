@@ -64,7 +64,7 @@ export function getProjectMediaUrls(projects: Project[]): string[] {
 export function buildProjectShareText({
   projects,
   shareUrl,
-  includeLink = true,
+  includeLink = false,
   includeMediaUrls = false,
 }: {
   projects: Project[];
@@ -245,30 +245,25 @@ export async function shareProjects({
 }: {
   projects: Project[];
 }): Promise<ProjectShareResult> {
-  const shareUrl = getProjectShareUrl(projects.map((project) => project.id));
   const message = buildProjectShareText({
     projects,
-    shareUrl,
-    includeLink: true,
-    includeMediaUrls: true,
+    includeLink: false,
+    includeMediaUrls: false,
   });
 
-  let shareableFiles: File[] = [];
+  let files: File[] = [];
   try {
-    const files = await fetchProjectMediaFiles(projects);
-    const imageFiles = getShareableImageFiles(files);
-    shareableFiles = imageFiles.length > 0 ? imageFiles : files;
+    files = await fetchProjectMediaFiles(projects);
   } catch {
-    shareableFiles = [];
+    files = [];
   }
 
-  openWhatsAppWithMessage(message);
-
-  if (shareableFiles.length > 0 && canShareProjectMediaFiles(shareableFiles)) {
+  if (files.length > 0 && canShareProjectMediaFiles(files)) {
     try {
       await navigator.share({
-        files: shareableFiles,
+        files,
         title: getShareTitle(projects),
+        text: message,
       });
       return "whatsapp-with-photos";
     } catch (error) {
@@ -276,6 +271,7 @@ export async function shareProjects({
     }
   }
 
+  openWhatsAppWithMessage(message);
   return "whatsapp";
 }
 
