@@ -199,9 +199,14 @@ export interface ProjectMediaInsert {
 }
 
 export const DISQUALIFIED_STAGE_LABEL = "Disqualified";
+export const QUALIFIED_STAGE_LABEL = "Qualified";
 
 export function isArchivedLead(lead: Pick<Lead, "pipeline_stages">): boolean {
   return lead.pipeline_stages?.label === DISQUALIFIED_STAGE_LABEL;
+}
+
+export function isQualifiedLead(lead: Pick<Lead, "pipeline_stages">): boolean {
+  return lead.pipeline_stages?.label === QUALIFIED_STAGE_LABEL;
 }
 
 export const LEAD_SOURCES = ["Meta", "Google", "Reference", "Walk-in", "99acres", "MagicBricks"] as const;

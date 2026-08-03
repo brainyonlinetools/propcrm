@@ -30,7 +30,7 @@ export function TaskReminderPoller() {
           navigator.serviceWorker.ready.then((registration) => {
             registration.showNotification("Follow-up reminder", {
               body: `${task.title} — ${leadName}`,
-              icon: "/icon-192.png",
+              icon: "/icons/icon-192.png",
               tag: `task-${task.id}`,
               data: { url: `/leads/${task.lead_id}` },
             });
@@ -38,7 +38,7 @@ export function TaskReminderPoller() {
         } else {
           new Notification("Follow-up reminder", {
             body: `${task.title} — ${leadName}`,
-            icon: "/icon-192.png",
+            icon: "/icons/icon-192.png",
             tag: `task-${task.id}`,
           });
         }

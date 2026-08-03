@@ -5,7 +5,7 @@ import { AlertCircle } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { StageBadge } from "@/components/shared/StatusBadge";
 import { useFieldDefinitions } from "@/lib/queries/fieldDefinitions";
-import { cn, formatDisplayDate, formatPhone } from "@/lib/utils";
+import { cn, formatDisplayDate, formatPhone, formatRelativeDate } from "@/lib/utils";
 import type { Lead } from "@/types";
 
 interface LeadCardProps {
@@ -13,6 +13,7 @@ interface LeadCardProps {
   selectionMode?: boolean;
   selected?: boolean;
   onToggleSelect?: (leadId: string) => void;
+  showLastActivity?: boolean;
 }
 
 export function LeadCard({
@@ -20,6 +21,7 @@ export function LeadCard({
   selectionMode = false,
   selected = false,
   onToggleSelect,
+  showLastActivity = false,
 }: LeadCardProps) {
   const { data: fieldDefs = [] } = useFieldDefinitions("lead");
   const cardFields = fieldDefs.filter((f) => f.show_in_card);
@@ -59,10 +61,14 @@ export function LeadCard({
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-sm text-muted-foreground">
         {lead.phone && <span>{formatPhone(lead.phone)}</span>}
-        {(lead.acquired_date || lead.created_at) && (
-          <span className="text-xs">
-            {formatDisplayDate(lead.acquired_date ?? lead.created_at)}
-          </span>
+        {showLastActivity ? (
+          <span className="text-xs">Active {formatRelativeDate(lead.updated_at)}</span>
+        ) : (
+          (lead.acquired_date || lead.created_at) && (
+            <span className="text-xs">
+              {formatDisplayDate(lead.acquired_date ?? lead.created_at)}
+            </span>
+          )
         )}
       </div>
 

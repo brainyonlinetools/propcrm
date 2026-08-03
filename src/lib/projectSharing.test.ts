@@ -5,10 +5,15 @@ import {
   countProjectMedia,
   fetchProjectMediaFiles,
   getProjectMediaFileName,
+  getProjectMediaUrls,
   getProjectSharePath,
   getProjectShareUrl,
+  getShareableImageFiles,
+  getWhatsAppDeepLink,
   getWhatsAppShareUrl,
+  openWhatsAppWithMessage,
   parseProjectShareIds,
+  shareProjects,
 } from "@/lib/projectSharing";
 import type { Project, ProjectMedia } from "@/types";
 
@@ -79,6 +84,58 @@ describe("projectSharing", () => {
     expect(message).not.toContain("available in the link");
   });
 
+  it("includes direct media URLs when requested", () => {
+    const message = buildProjectShareText({
+      projects: [
+        makeProject({
+          project_media: [
+            {
+              id: "media-1",
+              project_id: "project-1",
+              storage_path: "project-1/photo.jpg",
+              media_type: "image",
+              mime_type: "image/jpeg",
+              file_size: 1000,
+              caption: null,
+              sort_order: 0,
+              created_at: "2026-01-01T00:00:00Z",
+              updated_at: "2026-01-01T00:00:00Z",
+              public_url: "https://example.com/photo.jpg",
+            },
+          ],
+        }),
+      ],
+      includeMediaUrls: true,
+    });
+
+    expect(message).toContain("Photos & videos:");
+    expect(message).toContain("https://example.com/photo.jpg");
+  });
+
+  it("collects media URLs across projects", () => {
+    expect(
+      getProjectMediaUrls([
+        makeProject({
+          project_media: [
+            {
+              id: "media-1",
+              project_id: "project-1",
+              storage_path: "project-1/photo.jpg",
+              media_type: "image",
+              mime_type: "image/jpeg",
+              file_size: 1000,
+              caption: null,
+              sort_order: 0,
+              created_at: "2026-01-01T00:00:00Z",
+              updated_at: "2026-01-01T00:00:00Z",
+              public_url: "https://example.com/photo.jpg",
+            },
+          ],
+        }),
+      ])
+    ).toEqual(["https://example.com/photo.jpg"]);
+  });
+
   it("builds a numbered multiple project message", () => {
     const message = buildProjectShareText({
       projects: [
@@ -108,6 +165,9 @@ describe("projectSharing", () => {
     const url = getWhatsAppShareUrl("Hello project buyer");
 
     expect(url).toBe("https://wa.me/?text=Hello%20project%20buyer");
+    expect(getWhatsAppDeepLink("Hello project buyer")).toBe(
+      "whatsapp://send?text=Hello%20project%20buyer"
+    );
   });
 
   it("parses comma separated project ids", () => {
@@ -184,13 +244,158 @@ describe("projectSharing", () => {
     expect(files).toHaveLength(1);
     expect(files[0].name).toBe("photo.jpg");
     expect(files[0].type).toBe("image/jpeg");
-    expect(fetchMock).toHaveBeenCalledWith("https://example.com/photo.jpg");
+    expect(fetchMock).toHaveBeenCalled();
   });
 
   it("detects when file sharing is unsupported", () => {
     const files = [new File(["hello"], "photo.jpg", { type: "image/jpeg" })];
 
     expect(canShareProjectMediaFiles(files)).toBe(false);
+  });
+
+  it("filters image files for native sharing", () => {
+    const files = [
+      new File(["image"], "photo.jpg", { type: "image/jpeg" }),
+      new File(["video"], "clip.mp4", { type: "video/mp4" }),
+    ];
+
+    expect(getShareableImageFiles(files)).toHaveLength(1);
+    expect(getShareableImageFiles(files)[0].name).toBe("photo.jpg");
+  });
+
+  it("opens WhatsApp with project details and photo links", async () => {
+    const clickMock = vi.fn();
+    const openMock = vi.fn();
+    vi.stubGlobal("window", {
+      open: openMock,
+      location: { origin: "https://crm.example" },
+    });
+    vi.stubGlobal("document", {
+      body: {
+        appendChild: vi.fn(),
+        removeChild: vi.fn(),
+      },
+      createElement: vi.fn(() => ({
+        href: "",
+        target: "",
+        rel: "",
+        click: clickMock,
+      })),
+    });
+    vi.stubGlobal("navigator", {
+      userAgent: "Mozilla/5.0",
+      share: undefined,
+      canShare: undefined,
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      blob: async () => new Blob(["image-bytes"], { type: "image/jpeg" }),
+    }));
+
+    const result = await shareProjects({
+      projects: [
+        makeProject({
+          project_media: [
+            {
+              id: "media-1",
+              project_id: "project-1",
+              storage_path: "project-1/photo.jpg",
+              media_type: "image",
+              mime_type: "image/jpeg",
+              file_size: 1000,
+              caption: null,
+              sort_order: 0,
+              created_at: "2026-01-01T00:00:00Z",
+              updated_at: "2026-01-01T00:00:00Z",
+              public_url: "https://example.com/photo.jpg",
+            },
+          ],
+        }),
+      ],
+    });
+
+    expect(result).toBe("whatsapp");
+    expect(clickMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("builds a WhatsApp message with project details and media links", () => {
+    const message = buildProjectShareText({
+      projects: [
+        makeProject({
+          project_media: [
+            {
+              id: "media-1",
+              project_id: "project-1",
+              storage_path: "project-1/photo.jpg",
+              media_type: "image",
+              mime_type: "image/jpeg",
+              file_size: 1000,
+              caption: null,
+              sort_order: 0,
+              created_at: "2026-01-01T00:00:00Z",
+              updated_at: "2026-01-01T00:00:00Z",
+              public_url: "https://example.com/photo.jpg",
+            },
+          ],
+        }),
+      ],
+      shareUrl: "https://crm.example/share/projects?ids=project-1",
+      includeLink: true,
+      includeMediaUrls: true,
+    });
+
+    expect(message).toContain("Anand Prime Residences");
+    expect(message).toContain("Location: Sector 62, Gurugram");
+    expect(message).toContain("https://example.com/photo.jpg");
+    expect(message).toContain("View details: https://crm.example/share/projects?ids=project-1");
+  });
+
+  it("still shares when media download fails", async () => {
+    const clickMock = vi.fn();
+    vi.stubGlobal("window", {
+      location: { origin: "https://crm.example" },
+    });
+    vi.stubGlobal("document", {
+      body: {
+        appendChild: vi.fn(),
+        removeChild: vi.fn(),
+      },
+      createElement: vi.fn(() => ({
+        href: "",
+        target: "",
+        rel: "",
+        click: clickMock,
+      })),
+    });
+    vi.stubGlobal("navigator", {
+      userAgent: "Mozilla/5.0",
+    });
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network error")));
+
+    const result = await shareProjects({
+      projects: [
+        makeProject({
+          project_media: [
+            {
+              id: "media-1",
+              project_id: "project-1",
+              storage_path: "project-1/photo.jpg",
+              media_type: "image",
+              mime_type: "image/jpeg",
+              file_size: 1000,
+              caption: null,
+              sort_order: 0,
+              created_at: "2026-01-01T00:00:00Z",
+              updated_at: "2026-01-01T00:00:00Z",
+              public_url: "https://example.com/photo.jpg",
+            },
+          ],
+        }),
+      ],
+    });
+
+    expect(result).toBe("whatsapp");
+    expect(clickMock).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -1,8 +1,9 @@
 "use client";
 
+import Image from "next/image";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Copy, Download, ExternalLink, Loader2 } from "lucide-react";
+import { Copy, Loader2, MessageCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -13,12 +14,11 @@ import {
 } from "@/components/ui/sheet";
 import {
   buildProjectShareText,
+  copyTextToClipboard,
   countProjectMedia,
-  downloadProjectMediaFiles,
-  fetchProjectMediaFiles,
+  getProjectMediaUrls,
   getProjectShareUrl,
-  getWhatsAppShareUrl,
-  shareProjectsWithMedia,
+  shareProjects,
 } from "@/lib/projectSharing";
 import type { Project } from "@/types";
 
@@ -33,53 +33,48 @@ export function ProjectShareSheet({
   onOpenChange,
   projects,
 }: ProjectShareSheetProps) {
-  const [isPreparing, setIsPreparing] = useState(false);
+  const [isSharing, setIsSharing] = useState(false);
   const projectIds = useMemo(() => projects.map((project) => project.id), [projects]);
   const shareUrl = useMemo(() => getProjectShareUrl(projectIds), [projectIds]);
   const mediaCount = useMemo(() => countProjectMedia(projects), [projects]);
+  const mediaUrls = useMemo(() => getProjectMediaUrls(projects), [projects]);
   const message = useMemo(
-    () => buildProjectShareText({ projects, includeLink: false }),
-    [projects]
+    () =>
+      buildProjectShareText({
+        projects,
+        shareUrl,
+        includeLink: true,
+        includeMediaUrls: true,
+      }),
+    [projects, shareUrl]
   );
 
-  async function shareViaWhatsApp() {
-    setIsPreparing(true);
+  async function handleShare() {
+    setIsSharing(true);
     try {
-      await shareProjectsWithMedia({ projects });
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") return;
+      const result = await shareProjects({ projects });
 
-      if (error instanceof Error && error.message === "FILE_SHARE_UNSUPPORTED") {
-        toast.error(
-          "This device cannot attach files to WhatsApp from the browser. Download the media and attach it manually in WhatsApp."
-        );
-        return;
+      if (result === "whatsapp-with-photos") {
+        toast.success("WhatsApp opened with project details — attach photos from the share sheet");
+      } else {
+        toast.success("WhatsApp opened with project details and photo links");
       }
 
-      toast.error("Could not prepare project media for sharing");
+      onOpenChange(false);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      toast.error("Could not open WhatsApp — try copying the message instead");
     } finally {
-      setIsPreparing(false);
+      setIsSharing(false);
     }
   }
 
-  async function downloadMedia() {
-    setIsPreparing(true);
-    try {
-      const files = await fetchProjectMediaFiles(projects);
-      if (files.length === 0) {
-        toast.error("No photos or videos to download");
-        return;
-      }
-
-      downloadProjectMediaFiles(files);
-      toast.success(`Downloaded ${files.length} file${files.length === 1 ? "" : "s"}`);
-
-      const textOnlyMessage = buildProjectShareText({ projects, includeLink: false });
-      window.open(getWhatsAppShareUrl(textOnlyMessage), "_blank", "noopener,noreferrer");
-    } catch {
-      toast.error("Could not download project media");
-    } finally {
-      setIsPreparing(false);
+  async function copyMessage() {
+    const copied = await copyTextToClipboard(message);
+    if (copied) {
+      toast.success("Message copied — paste it in WhatsApp");
+    } else {
+      toast.error("Could not copy message");
     }
   }
 
@@ -96,48 +91,53 @@ export function ProjectShareSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="bottom" className="max-h-[86dvh] w-full overflow-y-auto rounded-t-xl px-4 pb-8">
         <SheetHeader className="px-0">
-          <SheetTitle>Share Projects</SheetTitle>
+          <SheetTitle>Share Project</SheetTitle>
           <SheetDescription>
-            {mediaCount > 0
-              ? `Send project details with ${mediaCount} photo/video ${mediaCount === 1 ? "attachment" : "attachments"} via WhatsApp.`
-              : `Send ${projects.length} selected ${projects.length === 1 ? "project" : "projects"} as a message.`}
+            Opens WhatsApp with project details{mediaCount > 0 ? ` and ${mediaCount} photo link${mediaCount === 1 ? "" : "s"}` : ""}.
           </SheetDescription>
         </SheetHeader>
 
         <div className="mt-4 flex flex-col gap-4">
+          {mediaUrls.length > 0 ? (
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {mediaUrls.map((url) => (
+                <div
+                  key={url}
+                  className="relative h-20 w-28 shrink-0 overflow-hidden rounded-md border border-border bg-muted"
+                >
+                  <Image
+                    src={url}
+                    alt="Project photo"
+                    fill
+                    sizes="112px"
+                    className="object-cover"
+                    unoptimized
+                  />
+                </div>
+              ))}
+            </div>
+          ) : null}
+
           <div className="rounded-lg border border-border bg-muted/40 p-3">
-            <p className="mb-2 text-xs font-medium text-muted-foreground">Message Preview</p>
+            <p className="mb-2 text-xs font-medium text-muted-foreground">WhatsApp Message</p>
             <pre className="max-h-60 overflow-y-auto whitespace-pre-wrap break-words text-sm font-sans">
               {message}
             </pre>
-            {mediaCount > 0 ? (
-              <p className="mt-3 text-xs text-muted-foreground">
-                {mediaCount} {mediaCount === 1 ? "file" : "files"} will be attached as images/videos.
-              </p>
-            ) : null}
           </div>
 
           <div className="flex flex-col gap-2">
-            <Button type="button" size="lg" onClick={shareViaWhatsApp} disabled={isPreparing}>
-              {isPreparing ? (
+            <Button type="button" size="lg" onClick={handleShare} disabled={isSharing}>
+              {isSharing ? (
                 <Loader2 data-icon="inline-start" className="animate-spin" />
               ) : (
-                <ExternalLink data-icon="inline-start" />
+                <MessageCircle data-icon="inline-start" />
               )}
-              {isPreparing ? "Preparing media..." : "Share via WhatsApp"}
+              {isSharing ? "Opening WhatsApp..." : "Share via WhatsApp"}
             </Button>
-            {mediaCount > 0 ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="lg"
-                onClick={downloadMedia}
-                disabled={isPreparing}
-              >
-                <Download data-icon="inline-start" />
-                Download Media & Open WhatsApp
-              </Button>
-            ) : null}
+            <Button type="button" variant="outline" size="lg" onClick={copyMessage}>
+              <Copy data-icon="inline-start" />
+              Copy Message
+            </Button>
             <Button type="button" variant="ghost" size="lg" onClick={copyLink}>
               <Copy data-icon="inline-start" />
               Copy Brochure Link

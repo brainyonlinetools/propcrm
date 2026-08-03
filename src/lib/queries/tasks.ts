@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import type { InventoryNote, LeadNote, NoteType, Task } from "@/types";
-import { leadsKey } from "./leads";
+import { leadsKey, qualifiedLeadsKey } from "./leads";
 import { inventoryKey } from "./inventory";
 
 export const tasksKey = (includeDone: boolean) => ["tasks", { includeDone }] as const;
@@ -128,6 +128,7 @@ export function useCreateLeadNote() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: leadNotesKey(data.lead_id) });
       queryClient.invalidateQueries({ queryKey: leadsKey });
+      queryClient.invalidateQueries({ queryKey: qualifiedLeadsKey });
     },
   });
 }

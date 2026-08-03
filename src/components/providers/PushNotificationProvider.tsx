@@ -2,8 +2,6 @@
 
 import { useEffect } from "react";
 
-const SW_PATH = "/sw.js";
-
 function urlBase64ToUint8Array(base64String: string) {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
@@ -48,7 +46,7 @@ export function PushNotificationProvider() {
 
     async function setup() {
       try {
-        const registration = await navigator.serviceWorker.register(SW_PATH);
+        const registration = await navigator.serviceWorker.ready;
         if (cancelled) return;
 
         if (Notification.permission === "granted") {
