@@ -285,6 +285,8 @@ export interface Database {
           lead_id: string;
           title: string;
           due_date: string | null;
+          due_time: string | null;
+          reminder_sent_at: string | null;
           is_done: boolean;
           created_at: string;
         };
@@ -293,6 +295,8 @@ export interface Database {
           lead_id: string;
           title: string;
           due_date?: string | null;
+          due_time?: string | null;
+          reminder_sent_at?: string | null;
           is_done?: boolean;
           created_at?: string;
         };
@@ -301,7 +305,33 @@ export interface Database {
           lead_id?: string;
           title?: string;
           due_date?: string | null;
+          due_time?: string | null;
+          reminder_sent_at?: string | null;
           is_done?: boolean;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      push_subscriptions: {
+        Row: {
+          id: string;
+          endpoint: string;
+          p256dh: string;
+          auth: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          endpoint: string;
+          p256dh: string;
+          auth: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          endpoint?: string;
+          p256dh?: string;
+          auth?: string;
           created_at?: string;
         };
         Relationships: [];

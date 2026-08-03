@@ -64,7 +64,25 @@ Open [http://localhost:3000](http://localhost:3000) — optimized for 375px mobi
 - **Leads** — list + Kanban views, search, filters, dynamic custom fields
 - **Lead Detail** — WhatsApp CTA, notes, tasks, linked units
 - **Inventory** — grid of units across projects with status badges
-- **Tasks** — global follow-up reminders sorted by due date
+- **Tasks** — global follow-up reminders sorted by due date, with optional reminder time (default 9:00 AM IST) and phone notifications
+
+## Task reminders (phone notifications)
+
+When you add a follow-up task on a lead with a due date, you can optionally set a reminder time (defaults to **9:00 AM IST**). At that time, the app sends a push notification to your phone.
+
+### Setup
+
+1. Apply migration `supabase/migrations/008_task_reminders_and_push.sql`
+2. Generate VAPID keys: `npx web-push generate-vapid-keys`
+3. Add to `.env.local` / Vercel:
+   - `NEXT_PUBLIC_VAPID_PUBLIC_KEY`
+   - `VAPID_PRIVATE_KEY`
+   - `VAPID_SUBJECT` (e.g. `mailto:you@example.com`)
+4. On your phone: open the CRM, allow notifications when prompted, then **Add to Home Screen** (required on iOS for background push)
+5. Vercel Cron hits `/api/cron/task-reminders` every minute (Pro plan). On Hobby, use [cron-job.org](https://cron-job.org) to ping that URL every minute with `Authorization: Bearer <CRON_SECRET>`
+
+When the app is open, reminders also fire via a client-side poller without waiting for cron.
+
 - **Settings** — manage field definitions, pipeline stages, projects, agent name
 
 ## Google Sheets ↔ Meta Leads sync

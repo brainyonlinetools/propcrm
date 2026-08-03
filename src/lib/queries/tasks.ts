@@ -53,7 +53,7 @@ export function useLeadTasks(leadId: string) {
 export function useCreateTask() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (task: Pick<Task, "lead_id" | "title" | "due_date">) => {
+    mutationFn: async (task: Pick<Task, "lead_id" | "title" | "due_date" | "due_time">) => {
       const { data, error } = await supabase
         .from("tasks")
         .insert(task)

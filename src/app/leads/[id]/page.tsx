@@ -43,6 +43,7 @@ import {
   useLeadTasks,
 } from "@/lib/queries/tasks";
 import { formatPhone, formatDisplayDate, formatRelativeDate } from "@/lib/utils";
+import { DEFAULT_TASK_REMINDER_TIME } from "@/lib/taskReminders";
 import { NOTE_TYPE_CONFIG, type NoteType } from "@/types";
 
 export default function LeadDetailPage({
@@ -65,6 +66,7 @@ export default function LeadDetailPage({
   const [noteContent, setNoteContent] = useState("");
   const [taskTitle, setTaskTitle] = useState("");
   const [taskDue, setTaskDue] = useState("");
+  const [taskTime, setTaskTime] = useState("");
   const [unitSearchOpen, setUnitSearchOpen] = useState(false);
 
   if (isLoading) {
@@ -127,9 +129,11 @@ export default function LeadDetailPage({
         lead_id: id,
         title: taskTitle.trim(),
         due_date: taskDue || null,
+        due_time: taskDue ? (taskTime || DEFAULT_TASK_REMINDER_TIME) : null,
       });
       setTaskTitle("");
       setTaskDue("");
+      setTaskTime("");
       toast.success("Task added");
     } catch {
       toast.error("Failed to add task");
@@ -304,6 +308,20 @@ export default function LeadDetailPage({
             value={taskDue}
             onChange={(e) => setTaskDue(e.target.value)}
           />
+          {taskDue && (
+            <div className="flex flex-col gap-1">
+              <Input
+                type="time"
+                className="h-12"
+                value={taskTime}
+                placeholder="09:00"
+                onChange={(e) => setTaskTime(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Reminder time (optional, defaults to 9:00 AM IST)
+              </p>
+            </div>
+          )}
           <Button onClick={handleAddTask} disabled={!taskTitle.trim()}>
             Add Task
           </Button>

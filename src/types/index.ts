@@ -147,6 +147,8 @@ export interface Task {
   lead_id: string;
   title: string;
   due_date: string | null;
+  due_time: string | null;
+  reminder_sent_at: string | null;
   is_done: boolean;
   created_at: string;
   leads?: Pick<Lead, "id" | "name"> | null;

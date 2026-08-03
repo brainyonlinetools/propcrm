@@ -4,6 +4,8 @@ import { Toaster } from "@/components/ui/sonner";
 import { BottomNav } from "@/components/shared/BottomNav";
 import { QueryProvider } from "@/components/providers/QueryProvider";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
+import { PushNotificationProvider } from "@/components/providers/PushNotificationProvider";
+import { TaskReminderPoller } from "@/components/providers/TaskReminderPoller";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -19,6 +21,12 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Anand Prime CRM",
   description: "Premium real estate CRM for Anand Prime, Gurugram",
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Anand Prime",
+  },
 };
 
 export const viewport: Viewport = {
@@ -44,6 +52,8 @@ export default function RootLayout({
           storageKey="anand-prime-theme"
         >
           <QueryProvider>
+            <PushNotificationProvider />
+            <TaskReminderPoller />
             <div className="mx-auto min-h-dvh w-full max-w-lg overflow-x-hidden pb-20">
               {children}
             </div>

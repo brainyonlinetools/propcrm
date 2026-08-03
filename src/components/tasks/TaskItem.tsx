@@ -4,6 +4,7 @@ import Link from "next/link";
 import { format, isPast, parseISO, startOfDay } from "date-fns";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToggleTask } from "@/lib/queries/tasks";
+import { formatTaskDueTime } from "@/lib/taskReminders";
 import { cn } from "@/lib/utils";
 import type { Task } from "@/types";
 
@@ -64,6 +65,8 @@ export function TaskItem({ task, showLead = true }: TaskItemProps) {
           >
             {isOverdue ? "Overdue · " : ""}
             {format(parseISO(task.due_date), "d MMM yyyy")}
+            {" · "}
+            {formatTaskDueTime(task.due_time)} IST
           </p>
         )}
       </div>
