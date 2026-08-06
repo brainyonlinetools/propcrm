@@ -255,6 +255,45 @@ export interface Database {
         };
         Relationships: [];
       };
+      inventory_media: {
+        Row: {
+          id: string;
+          inventory_id: string;
+          storage_path: string;
+          media_type: string;
+          mime_type: string;
+          file_size: number | null;
+          caption: string | null;
+          sort_order: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          inventory_id: string;
+          storage_path: string;
+          media_type: string;
+          mime_type: string;
+          file_size?: number | null;
+          caption?: string | null;
+          sort_order?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          inventory_id?: string;
+          storage_path?: string;
+          media_type?: string;
+          mime_type?: string;
+          file_size?: number | null;
+          caption?: string | null;
+          sort_order?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       inventory_notes: {
         Row: {
           id: string;

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, MessageCircle, Pencil, Phone, Trash2 } from "lucide-react";
+import { ArrowLeft, MessageCircle, Pencil, Phone, Share2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,6 +29,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { DynamicFieldRenderer } from "@/components/shared/DynamicFieldRenderer";
 import { StageBadge, StatusBadge } from "@/components/shared/StatusBadge";
+import { InventoryMediaUploader } from "@/components/inventory/InventoryMediaUploader";
+import { InventoryShareSheet } from "@/components/inventory/InventoryShareSheet";
 import { UnitForm } from "@/components/inventory/UnitForm";
 import { useDeleteInventory, useInventoryItem, useUpdateInventory } from "@/lib/queries/inventory";
 import { useLeadsByUnit } from "@/lib/queries/leads";
@@ -57,6 +59,7 @@ export function UnitDetailPanel({
   const deleteInventory = useDeleteInventory();
   const createNote = useCreateInventoryNote();
   const [editOpen, setEditOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [customData, setCustomData] = useState<Record<string, unknown>>({});
   const [noteType, setNoteType] = useState<NoteType>("note");
@@ -202,6 +205,14 @@ export function UnitDetailPanel({
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setShareOpen(true)}
+          aria-label="Share unit"
+        >
+          <Share2 />
+        </Button>
         <Button variant="ghost" size="icon" onClick={() => setEditOpen(true)} aria-label="Edit unit">
           <Pencil />
         </Button>
@@ -308,6 +319,10 @@ export function UnitDetailPanel({
             />
           </div>
         </div>
+      </section>
+
+      <section className="rounded-lg border border-border bg-card p-4 shadow-card">
+        <InventoryMediaUploader unit={unit} />
       </section>
 
       {(Boolean(unit.custom_data?.owner_name) || Boolean(ownerPhone)) && (
@@ -448,6 +463,11 @@ export function UnitDetailPanel({
       </section>
 
       <UnitForm open={editOpen} onOpenChange={setEditOpen} unit={unit} />
+      <InventoryShareSheet
+        open={shareOpen}
+        onOpenChange={setShareOpen}
+        units={[unit]}
+      />
     </div>
   );
 }

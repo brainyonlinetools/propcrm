@@ -124,6 +124,21 @@ export interface Inventory {
   created_at: string;
   updated_at: string;
   projects?: Project | null;
+  inventory_media?: InventoryMedia[];
+}
+
+export interface InventoryMedia {
+  id: string;
+  inventory_id: string;
+  storage_path: string;
+  media_type: ProjectMediaType;
+  mime_type: string;
+  file_size: number | null;
+  caption: string | null;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+  public_url?: string;
 }
 
 export interface LeadNote {
@@ -175,6 +190,16 @@ export interface InventoryInsert {
   status?: InventoryStatus;
   acquired_date?: string | null;
   custom_data?: Record<string, unknown>;
+}
+
+export interface InventoryMediaInsert {
+  inventory_id: string;
+  storage_path: string;
+  media_type: ProjectMediaType;
+  mime_type: string;
+  file_size?: number | null;
+  caption?: string | null;
+  sort_order?: number;
 }
 
 export interface ProjectInsert {

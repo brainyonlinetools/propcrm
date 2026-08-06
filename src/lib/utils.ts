@@ -25,6 +25,17 @@ export function formatPhone(phone: string | null | undefined): string {
   return phone;
 }
 
+/** Digits-only key for matching Indian numbers (last 10 digits). */
+export function normalizePhoneKey(phone: string | null | undefined): string | null {
+  if (!phone) return null;
+  const digits = phone.replace(/\D/g, "");
+  if (!digits) return null;
+  if (digits.length === 10) return digits;
+  if (digits.length === 12 && digits.startsWith("91")) return digits.slice(2);
+  if (digits.length > 10) return digits.slice(-10);
+  return digits;
+}
+
 export function phoneToWhatsApp(phone: string | null | undefined): string {
   if (!phone) return "";
   const digits = phone.replace(/\D/g, "");
