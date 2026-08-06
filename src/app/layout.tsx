@@ -82,11 +82,16 @@ export default function RootLayout({
           <QueryProvider>
             <PushNotificationProvider />
             <TaskReminderPoller />
-            <div className="mx-auto min-h-dvh w-full max-w-lg overflow-x-hidden pb-20">
+            <div className="mx-auto min-h-dvh w-full max-w-lg overflow-x-hidden pb-20 md:max-w-none md:pb-0 md:pl-16">
               {children}
             </div>
             <BottomNav />
-            <Toaster position="bottom-center" richColors offset="5rem" />
+            <Toaster
+              position="bottom-center"
+              richColors
+              className="md:left-[calc(50%+2rem)]"
+              offset="5rem"
+            />
           </QueryProvider>
         </ThemeProvider>
       </body>

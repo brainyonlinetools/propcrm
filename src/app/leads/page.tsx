@@ -1,23 +1,31 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { CheckSquare, LayoutGrid, List, Plus, Search, Upload, X, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { LeadCard } from "@/components/leads/LeadCard";
+import { LeadDetailPanel } from "@/components/leads/LeadDetailPanel";
 import { LeadKanban } from "@/components/leads/LeadKanban";
 import { LeadForm } from "@/components/leads/LeadForm";
 import { BatchStageChangeSheet } from "@/components/leads/BatchStageChangeSheet";
 import { BatchWhatsAppSheet } from "@/components/leads/BatchWhatsAppSheet";
 import { BulkImportSheet } from "@/components/shared/BulkImportSheet";
 import { CollapsibleFilterSection } from "@/components/shared/CollapsibleFilterSection";
+import { ContactListRow } from "@/components/shared/ContactListRow";
+import {
+  DetailEmptyState,
+  MasterDetailLayout,
+} from "@/components/shared/MasterDetailLayout";
+import { StageBadge } from "@/components/shared/StatusBadge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PullToRefresh } from "@/components/shared/PullToRefresh";
+import { useIsDesktop } from "@/hooks/useIsDesktop";
 import { leadsKey, qualifiedLeadsKey, useLeads, useQualifiedLeads } from "@/lib/queries/leads";
 import { usePipelineStages } from "@/lib/queries/pipelineStages";
-import { cn } from "@/lib/utils";
+import { cn, formatDisplayDate, formatPhone, formatRelativeDate } from "@/lib/utils";
 import {
   DISQUALIFIED_STAGE_LABEL,
   QUALIFIED_STAGE_LABEL,
@@ -30,6 +38,7 @@ type LeadViewFilter = "active" | "archived";
 type LeadTab = "all" | "qualified";
 
 export default function LeadsPage() {
+  const isDesktop = useIsDesktop();
   const [leadTab, setLeadTab] = useState<LeadTab>("all");
   const [view, setView] = useState<ViewMode>("list");
   const [search, setSearch] = useState("");
@@ -42,6 +51,7 @@ export default function LeadsPage() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [batchOpen, setBatchOpen] = useState(false);
   const [stageChangeOpen, setStageChangeOpen] = useState(false);
   const queryClient = useQueryClient();
@@ -108,6 +118,15 @@ export default function LeadsPage() {
     viewFilter,
     leadTab,
   ]);
+
+  const listView = view === "list" || leadTab === "qualified";
+  const splitMode = isDesktop && listView && !selectionMode;
+
+  useEffect(() => {
+    if (!splitMode) return;
+    if (selectedId && filtered.some((lead) => lead.id === selectedId)) return;
+    setSelectedId(filtered[0]?.id ?? null);
+  }, [splitMode, filtered, selectedId]);
 
   const activeFilterCount = [
     viewFilter !== "active" ? viewFilter : null,
@@ -179,213 +198,220 @@ export default function LeadsPage() {
     setSelectedIds(new Set());
   }
 
-  return (
-    <div className="flex min-h-dvh flex-col">
-      <header className="sticky top-0 z-40 border-b border-border bg-background/95 px-4 py-3 backdrop-blur-sm">
-        <div className="flex items-center justify-between gap-2">
-          <h1 className="text-lg font-semibold tracking-tight">Leads</h1>
-          <div className="flex shrink-0 gap-1">
-            <Button
-              variant={selectionMode ? "secondary" : "ghost"}
-              size="icon"
-              onClick={toggleSelectionMode}
-              disabled={leadTab === "qualified"}
-              aria-label={selectionMode ? "Exit selection mode" : "Select leads for bulk actions"}
-            >
-              <CheckSquare />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setImportOpen(true)}
-              aria-label="Bulk import leads"
-            >
-              <Upload />
-            </Button>
-            <Button
-              variant={view === "list" ? "secondary" : "ghost"}
-              size="icon"
-              onClick={() => setView("list")}
-              aria-label="List view"
-            >
-              <List />
-            </Button>
-            <Button
-              variant={view === "kanban" ? "secondary" : "ghost"}
-              size="icon"
-              onClick={() => setView("kanban")}
-              disabled={leadTab === "qualified"}
-              aria-label="Kanban view"
-            >
-              <LayoutGrid />
-            </Button>
-          </div>
-        </div>
-
-        <Tabs value={leadTab} onValueChange={handleLeadTabChange} className="mt-3">
-          <TabsList className="grid h-10 w-full grid-cols-2">
-            <TabsTrigger value="all">All</TabsTrigger>
-            <TabsTrigger value="qualified">
-              Qualified
-              {qualifiedLeads.length > 0 && (
-                <span className="ml-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
-                  {qualifiedLeads.length}
-                </span>
-              )}
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
-
-        <div className="relative mt-3">
-          <Search className="absolute top-1/2 left-3 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Search name, phone, email…"
-            className="h-12 pl-9"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-
-        <div className="mt-2">
-          <button
-            type="button"
-            onClick={() => setFiltersOpen((v) => !v)}
-            className="flex w-full items-center justify-between rounded-md border border-border bg-card px-3 py-2 text-sm"
-            aria-expanded={filtersOpen}
+  const listHeader = (
+    <header className="sticky top-0 z-40 shrink-0 border-b border-border bg-background/95 px-4 py-3 backdrop-blur-sm">
+      <div className="flex items-center justify-between gap-2">
+        <h1 className="text-lg font-semibold tracking-tight">Leads</h1>
+        <div className="flex shrink-0 gap-1">
+          <Button
+            variant={selectionMode ? "secondary" : "ghost"}
+            size="icon"
+            onClick={toggleSelectionMode}
+            disabled={leadTab === "qualified"}
+            aria-label={selectionMode ? "Exit selection mode" : "Select leads for bulk actions"}
           >
-            <span className="font-medium">
-              Filters
-              {activeFilterCount > 0 && (
-                <span className="ml-1.5 rounded-full bg-primary px-1.5 py-0.5 text-xs text-primary-foreground">
-                  {activeFilterCount}
-                </span>
-              )}
-            </span>
-            <ChevronDown
-              className={cn(
-                "size-4 text-muted-foreground transition-transform",
-                filtersOpen && "rotate-180"
-              )}
-            />
-          </button>
-
-          {filtersOpen && (
-            <div className="mt-1 rounded-md border border-border bg-card px-3">
-              {activeFilterCount > 0 && (
-                <div className="flex justify-end border-b border-border py-2">
-                  <button
-                    type="button"
-                    onClick={clearFilters}
-                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-                  >
-                    <X className="size-3" />
-                    Clear all
-                  </button>
-                </div>
-              )}
-
-              {leadTab === "all" && (
-                <CollapsibleFilterSection
-                  title="View"
-                  summary={viewFilter === "archived" ? "Archived" : "Active"}
-                  hasActiveFilter={viewFilter !== "active"}
-                >
-                  <FilterChip
-                    label="Active"
-                    active={viewFilter === "active"}
-                    onClick={() => setViewFilter("active")}
-                  />
-                  <FilterChip
-                    label="Archived"
-                    active={viewFilter === "archived"}
-                    onClick={() => setViewFilter("archived")}
-                  />
-                </CollapsibleFilterSection>
-              )}
-
-              {leadTab === "all" && (
-                <CollapsibleFilterSection
-                  title="Stage"
-                  summary={activeStageLabel ?? "All stages"}
-                  hasActiveFilter={Boolean(stageFilter)}
-                >
-                  <FilterChip
-                    label="All stages"
-                    active={!stageFilter}
-                    onClick={() => setStageFilter(null)}
-                  />
-                  {visibleStages.map((s) => (
-                    <FilterChip
-                      key={s.id}
-                      label={s.label}
-                      active={stageFilter === s.id}
-                      onClick={() => setStageFilter(stageFilter === s.id ? null : s.id)}
-                    />
-                  ))}
-                </CollapsibleFilterSection>
-              )}
-
-              <CollapsibleFilterSection
-                title="Source"
-                summary={sourceFilter ?? "All sources"}
-                hasActiveFilter={Boolean(sourceFilter)}
-              >
-                <FilterChip
-                  label="All sources"
-                  active={!sourceFilter}
-                  onClick={() => setSourceFilter(null)}
-                />
-                {sources.map((s) => (
-                  <FilterChip
-                    key={s}
-                    label={s}
-                    active={sourceFilter === s}
-                    onClick={() => setSourceFilter(sourceFilter === s ? null : s)}
-                  />
-                ))}
-              </CollapsibleFilterSection>
-
-              <CollapsibleFilterSection
-                title="Project"
-                summary={activeProjectLabel ?? "All projects"}
-                hasActiveFilter={Boolean(projectFilter)}
-              >
-                <FilterChip
-                  label="All projects"
-                  active={!projectFilter}
-                  onClick={() => setProjectFilter(null)}
-                />
-                {projectInterests.map((name) => (
-                  <FilterChip
-                    key={name}
-                    label={name}
-                    active={projectFilter === name}
-                    onClick={() =>
-                      setProjectFilter(projectFilter === name ? null : name)
-                    }
-                  />
-                ))}
-              </CollapsibleFilterSection>
-            </div>
-          )}
+            <CheckSquare />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setImportOpen(true)}
+            aria-label="Bulk import leads"
+          >
+            <Upload />
+          </Button>
+          <Button
+            variant={view === "list" ? "secondary" : "ghost"}
+            size="icon"
+            onClick={() => setView("list")}
+            aria-label="List view"
+          >
+            <List />
+          </Button>
+          <Button
+            variant={view === "kanban" ? "secondary" : "ghost"}
+            size="icon"
+            onClick={() => setView("kanban")}
+            disabled={leadTab === "qualified"}
+            aria-label="Kanban view"
+          >
+            <LayoutGrid />
+          </Button>
         </div>
-      </header>
+      </div>
 
-      <PullToRefresh onRefresh={handleRefresh} className="flex-1 px-4 py-4">
-        {listLoading ? (
-          <div className="flex flex-col gap-3">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-28 w-full rounded-lg" />
-            ))}
+      <Tabs value={leadTab} onValueChange={handleLeadTabChange} className="mt-3">
+        <TabsList className="grid h-10 w-full grid-cols-2">
+          <TabsTrigger value="all">All</TabsTrigger>
+          <TabsTrigger value="qualified">
+            Qualified
+            {qualifiedLeads.length > 0 && (
+              <span className="ml-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                {qualifiedLeads.length}
+              </span>
+            )}
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
+
+      <div className="relative mt-3">
+        <Search className="absolute top-1/2 left-3 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          placeholder="Search name, phone, email…"
+          className="h-12 pl-9"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </div>
+
+      <div className="mt-2">
+        <button
+          type="button"
+          onClick={() => setFiltersOpen((v) => !v)}
+          className="flex w-full items-center justify-between rounded-md border border-border bg-card px-3 py-2 text-sm"
+          aria-expanded={filtersOpen}
+        >
+          <span className="font-medium">
+            Filters
+            {activeFilterCount > 0 && (
+              <span className="ml-1.5 rounded-full bg-primary px-1.5 py-0.5 text-xs text-primary-foreground">
+                {activeFilterCount}
+              </span>
+            )}
+          </span>
+          <ChevronDown
+            className={cn(
+              "size-4 text-muted-foreground transition-transform",
+              filtersOpen && "rotate-180"
+            )}
+          />
+        </button>
+
+        {filtersOpen && (
+          <div className="mt-1 max-h-64 overflow-y-auto rounded-md border border-border bg-card px-3 md:max-h-80">
+            {activeFilterCount > 0 && (
+              <div className="flex justify-end border-b border-border py-2">
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  <X className="size-3" />
+                  Clear all
+                </button>
+              </div>
+            )}
+
+            {leadTab === "all" && (
+              <CollapsibleFilterSection
+                title="View"
+                summary={viewFilter === "archived" ? "Archived" : "Active"}
+                hasActiveFilter={viewFilter !== "active"}
+              >
+                <FilterChip
+                  label="Active"
+                  active={viewFilter === "active"}
+                  onClick={() => setViewFilter("active")}
+                />
+                <FilterChip
+                  label="Archived"
+                  active={viewFilter === "archived"}
+                  onClick={() => setViewFilter("archived")}
+                />
+              </CollapsibleFilterSection>
+            )}
+
+            {leadTab === "all" && (
+              <CollapsibleFilterSection
+                title="Stage"
+                summary={activeStageLabel ?? "All stages"}
+                hasActiveFilter={Boolean(stageFilter)}
+              >
+                <FilterChip
+                  label="All stages"
+                  active={!stageFilter}
+                  onClick={() => setStageFilter(null)}
+                />
+                {visibleStages.map((s) => (
+                  <FilterChip
+                    key={s.id}
+                    label={s.label}
+                    active={stageFilter === s.id}
+                    onClick={() => setStageFilter(stageFilter === s.id ? null : s.id)}
+                  />
+                ))}
+              </CollapsibleFilterSection>
+            )}
+
+            <CollapsibleFilterSection
+              title="Source"
+              summary={sourceFilter ?? "All sources"}
+              hasActiveFilter={Boolean(sourceFilter)}
+            >
+              <FilterChip
+                label="All sources"
+                active={!sourceFilter}
+                onClick={() => setSourceFilter(null)}
+              />
+              {sources.map((s) => (
+                <FilterChip
+                  key={s}
+                  label={s}
+                  active={sourceFilter === s}
+                  onClick={() => setSourceFilter(sourceFilter === s ? null : s)}
+                />
+              ))}
+            </CollapsibleFilterSection>
+
+            <CollapsibleFilterSection
+              title="Project"
+              summary={activeProjectLabel ?? "All projects"}
+              hasActiveFilter={Boolean(projectFilter)}
+            >
+              <FilterChip
+                label="All projects"
+                active={!projectFilter}
+                onClick={() => setProjectFilter(null)}
+              />
+              {projectInterests.map((name) => (
+                <FilterChip
+                  key={name}
+                  label={name}
+                  active={projectFilter === name}
+                  onClick={() =>
+                    setProjectFilter(projectFilter === name ? null : name)
+                  }
+                />
+              ))}
+            </CollapsibleFilterSection>
           </div>
-        ) : listError ? (
+        )}
+      </div>
+    </header>
+  );
+
+  const listBody = (
+    <PullToRefresh
+      onRefresh={handleRefresh}
+      className={cn("flex-1", splitMode ? "overflow-y-auto" : "px-4 py-4")}
+    >
+      {listLoading ? (
+        <div className={cn("flex flex-col gap-3", splitMode ? "p-3" : "")}>
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className={cn("w-full rounded-lg", splitMode ? "h-16" : "h-28")} />
+          ))}
+        </div>
+      ) : listError ? (
+        <div className={splitMode ? "p-4" : undefined}>
           <EmptyState
             title="Could not load leads"
             description="Check your Supabase connection and run the migration in supabase/migrations/001_initial_schema.sql"
             actionLabel="Try again"
             onAction={handleRefresh}
           />
-        ) : filtered.length === 0 ? (
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className={splitMode ? "p-4" : undefined}>
           <EmptyState
             title={
               leadTab === "qualified"
@@ -410,7 +436,38 @@ export default function LeadsPage() {
               sourceLeads.length === 0 && leadTab === "all" ? () => setFormOpen(true) : undefined
             }
           />
-        ) : view === "list" || leadTab === "qualified" ? (
+        </div>
+      ) : listView ? (
+        splitMode ? (
+          <div className="flex flex-col bg-card">
+            {filtered.map((lead) => (
+              <ContactListRow
+                key={lead.id}
+                name={lead.name}
+                subtitle={
+                  lead.phone
+                    ? formatPhone(lead.phone)
+                    : (lead.project_interest ?? lead.source ?? undefined)
+                }
+                meta={
+                  leadTab === "qualified"
+                    ? formatRelativeDate(lead.updated_at)
+                    : formatDisplayDate(lead.acquired_date ?? lead.created_at)
+                }
+                badge={
+                  lead.pipeline_stages ? (
+                    <StageBadge
+                      label={lead.pipeline_stages.label}
+                      color={lead.pipeline_stages.color}
+                    />
+                  ) : undefined
+                }
+                selected={selectedId === lead.id}
+                onClick={() => setSelectedId(lead.id)}
+              />
+            ))}
+          </div>
+        ) : (
           <div className="flex flex-col gap-3">
             {filtered.map((lead) => (
               <LeadCard
@@ -423,14 +480,42 @@ export default function LeadsPage() {
               />
             ))}
           </div>
-        ) : (
-          <LeadKanban leads={filtered} stages={visibleStages} className="-mx-4 px-4" />
-        )}
-      </PullToRefresh>
+        )
+      ) : (
+        <LeadKanban
+          leads={filtered}
+          stages={visibleStages}
+          className={splitMode ? undefined : "-mx-4 px-4"}
+        />
+      )}
+    </PullToRefresh>
+  );
+
+  const listPane = (
+    <div className="flex min-h-0 flex-1 flex-col">
+      {listHeader}
+      {listBody}
+    </div>
+  );
+
+  const detailPane = selectedId ? (
+    <div className="h-full overflow-y-auto bg-background">
+      <LeadDetailPanel key={selectedId} id={selectedId} embedded />
+    </div>
+  ) : (
+    <DetailEmptyState
+      title="Select a lead"
+      description="Choose a contact from the list to see their details, notes, and tasks."
+    />
+  );
+
+  return (
+    <>
+      <MasterDetailLayout split={splitMode} list={listPane} detail={detailPane} />
 
       <Button
         size="icon-lg"
-        className="fixed right-4 bottom-20 z-40 size-14 rounded-full shadow-card"
+        className="fixed right-4 bottom-20 z-40 size-14 rounded-full shadow-card md:right-6 md:bottom-6"
         onClick={() => setFormOpen(true)}
         aria-label="Add lead"
       >
@@ -438,11 +523,9 @@ export default function LeadsPage() {
       </Button>
 
       {selectionMode && selectedIds.size > 0 && (
-        <div className="fixed inset-x-0 bottom-16 z-40 border-t border-border bg-background/95 px-4 py-3 backdrop-blur-sm">
-          <div className="mx-auto flex max-w-lg flex-col gap-2">
-            <p className="text-sm font-medium">
-              {selectedIds.size} selected
-            </p>
+        <div className="fixed inset-x-0 bottom-16 z-40 border-t border-border bg-background/95 px-4 py-3 backdrop-blur-sm md:bottom-0 md:left-16">
+          <div className="mx-auto flex max-w-lg flex-col gap-2 md:max-w-none">
+            <p className="text-sm font-medium">{selectedIds.size} selected</p>
             <div className="flex gap-2">
               <Button variant="outline" className="h-10 flex-1" onClick={selectAllVisible}>
                 Select all
@@ -481,7 +564,7 @@ export default function LeadsPage() {
         onOpenChange={setBatchOpen}
         onComplete={handleBatchComplete}
       />
-    </div>
+    </>
   );
 }
 

@@ -134,11 +134,30 @@ export function useDeleteProject() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
+      const { data: media, error: mediaError } = await supabase
+        .from("project_media")
+        .select("storage_path")
+        .eq("project_id", id);
+      if (mediaError) throw mediaError;
+
+      const paths = (media ?? [])
+        .map((item) => item.storage_path)
+        .filter((path): path is string => Boolean(path));
+      if (paths.length > 0) {
+        const { error: storageError } = await supabase.storage
+          .from(PROJECT_MEDIA_BUCKET)
+          .remove(paths);
+        if (storageError) throw storageError;
+      }
+
       const { error } = await supabase.from("projects").delete().eq("id", id);
       if (error) throw error;
+      return id;
     },
-    onSuccess: () => {
+    onSuccess: (id) => {
       queryClient.invalidateQueries({ queryKey: projectsKey });
+      queryClient.removeQueries({ queryKey: projectKey(id) });
+      queryClient.removeQueries({ queryKey: projectMediaKey(id) });
     },
   });
 }

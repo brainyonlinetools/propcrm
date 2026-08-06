@@ -1,21 +1,33 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Plus, Search, Share2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ProjectCard } from "@/components/projects/ProjectCard";
+import { ProjectDetailPanel } from "@/components/projects/ProjectDetailPanel";
 import { ProjectForm } from "@/components/projects/ProjectForm";
 import { ProjectShareSheet } from "@/components/projects/ProjectShareSheet";
+import { ContactListRow } from "@/components/shared/ContactListRow";
+import {
+  DetailEmptyState,
+  MasterDetailLayout,
+} from "@/components/shared/MasterDetailLayout";
 import { PullToRefresh } from "@/components/shared/PullToRefresh";
+import { useIsDesktop } from "@/hooks/useIsDesktop";
 import { projectsKey, useProjects } from "@/lib/queries/projects";
-import type { Project } from "@/types";
+import { cn } from "@/lib/utils";
+import { PROJECT_STATUS_LABELS, type Project } from "@/types";
+import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 
 export default function ProjectsPage() {
+  const isDesktop = useIsDesktop();
   const [search, setSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
@@ -41,9 +53,20 @@ export default function ProjectsPage() {
     });
   }, [projects, search]);
 
+  useEffect(() => {
+    if (!isDesktop) return;
+    if (selectedId && filtered.some((project) => project.id === selectedId)) return;
+    setSelectedId(filtered[0]?.id ?? null);
+  }, [isDesktop, filtered, selectedId]);
+
   const selectedProjects = useMemo(
     () => projects.filter((project) => selectedIds.has(project.id)),
     [projects, selectedIds]
+  );
+
+  const selectedProject = useMemo(
+    () => filtered.find((project) => project.id === selectedId) ?? null,
+    [filtered, selectedId]
   );
 
   function openCreateForm() {
@@ -72,51 +95,77 @@ export default function ProjectsPage() {
     setSelectedIds(new Set());
   }
 
+  function handleProjectDeleted(projectId: string) {
+    setSelectedIds((current) => {
+      if (!current.has(projectId)) return current;
+      const next = new Set(current);
+      next.delete(projectId);
+      return next;
+    });
+    setSelectedId((current) => (current === projectId ? null : current));
+    setEditingProject(null);
+    setFormOpen(false);
+  }
+
   async function handleRefresh() {
     await queryClient.invalidateQueries({ queryKey: projectsKey });
   }
 
-  return (
-    <div className="flex min-h-dvh flex-col">
-      <header className="sticky top-0 z-40 border-b border-border bg-background/95 px-4 py-3 backdrop-blur-sm">
-        <div className="flex items-center justify-between gap-2">
-          <div>
-            <h1 className="text-lg font-semibold tracking-tight">Projects</h1>
-            <p className="text-xs text-muted-foreground">
-              Manage client-ready project details and media.
-            </p>
-          </div>
-          <Button variant="ghost" size="icon" onClick={openCreateForm} aria-label="Add project">
-            <Plus />
-          </Button>
+  const listHeader = (
+    <header className="sticky top-0 z-40 shrink-0 border-b border-border bg-background/95 px-4 py-3 backdrop-blur-sm">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <h1 className="text-lg font-semibold tracking-tight">Projects</h1>
+          <p className="text-xs text-muted-foreground">
+            Manage client-ready project details and media.
+          </p>
         </div>
+        <Button variant="ghost" size="icon" onClick={openCreateForm} aria-label="Add project">
+          <Plus />
+        </Button>
+      </div>
 
-        <div className="relative mt-3">
-          <Search className="absolute top-1/2 left-3 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Search projects…"
-            className="h-12 pl-9"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-          />
+      <div className="relative mt-3">
+        <Search className="absolute top-1/2 left-3 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          placeholder="Search projects…"
+          className="h-12 pl-9"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+        />
+      </div>
+    </header>
+  );
+
+  const listBody = (
+    <PullToRefresh
+      onRefresh={handleRefresh}
+      className={cn("flex-1", isDesktop ? "overflow-y-auto" : "px-4 py-4")}
+    >
+      {isLoading ? (
+        <div
+          className={cn(
+            isDesktop ? "flex flex-col" : "grid grid-cols-1 gap-3 min-[380px]:grid-cols-2"
+          )}
+        >
+          {Array.from({ length: 4 }).map((_, index) => (
+            <Skeleton
+              key={index}
+              className={cn("rounded-lg", isDesktop ? "mx-3 my-2 h-16" : "h-64")}
+            />
+          ))}
         </div>
-      </header>
-
-      <PullToRefresh onRefresh={handleRefresh} className="flex-1 px-4 py-4">
-        {isLoading ? (
-          <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2">
-            {Array.from({ length: 4 }).map((_, index) => (
-              <Skeleton key={index} className="h-64 rounded-lg" />
-            ))}
-          </div>
-        ) : isError ? (
+      ) : isError ? (
+        <div className={isDesktop ? "p-4" : undefined}>
           <EmptyState
             title="Could not load projects"
             description="Check your Supabase connection and apply the latest migration."
             actionLabel="Try again"
             onAction={handleRefresh}
           />
-        ) : filtered.length === 0 ? (
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className={isDesktop ? "p-4" : undefined}>
           <EmptyState
             title={projects.length === 0 ? "No projects yet" : "No matching projects"}
             description={
@@ -127,24 +176,86 @@ export default function ProjectsPage() {
             actionLabel={projects.length === 0 ? "Add Project" : undefined}
             onAction={projects.length === 0 ? openCreateForm : undefined}
           />
-        ) : (
-          <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2">
-            {filtered.map((project) => (
-              <ProjectCard
-                key={project.id}
-                project={project}
-                selected={selectedIds.has(project.id)}
-                onSelectedChange={(selected) => updateSelection(project.id, selected)}
-                onEdit={() => openEditForm(project)}
+        </div>
+      ) : isDesktop ? (
+        <div className="flex flex-col bg-card">
+          {filtered.map((project) => (
+            <div key={project.id} className="relative flex items-stretch border-b border-border">
+              <div className="flex items-center pl-3">
+                <Checkbox
+                  checked={selectedIds.has(project.id)}
+                  onCheckedChange={(checked) =>
+                    updateSelection(project.id, Boolean(checked))
+                  }
+                  aria-label={`Select ${project.name}`}
+                />
+              </div>
+              <ContactListRow
+                className="border-b-0"
+                name={project.name}
+                subtitle={project.location ?? project.region ?? undefined}
+                meta={
+                  project.status ? PROJECT_STATUS_LABELS[project.status] : undefined
+                }
+                badge={
+                  (project.project_media?.length ?? 0) > 0 ? (
+                    <Badge variant="secondary" className="text-[10px]">
+                      {project.project_media!.length}
+                    </Badge>
+                  ) : undefined
+                }
+                selected={selectedId === project.id}
+                onClick={() => setSelectedId(project.id)}
               />
-            ))}
-          </div>
-        )}
-      </PullToRefresh>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2">
+          {filtered.map((project) => (
+            <ProjectCard
+              key={project.id}
+              project={project}
+              selected={selectedIds.has(project.id)}
+              onSelectedChange={(selected) => updateSelection(project.id, selected)}
+              onEdit={() => openEditForm(project)}
+            />
+          ))}
+        </div>
+      )}
+    </PullToRefresh>
+  );
+
+  const listPane = (
+    <div className="flex min-h-0 flex-1 flex-col">
+      {listHeader}
+      {listBody}
+    </div>
+  );
+
+  const detailPane = selectedProject ? (
+    <div className="h-full overflow-y-auto bg-background">
+      <ProjectDetailPanel
+        key={selectedProject.id}
+        project={selectedProject}
+        onEdit={() => openEditForm(selectedProject)}
+        onDeleted={() => handleProjectDeleted(selectedProject.id)}
+      />
+    </div>
+  ) : (
+    <DetailEmptyState
+      title="Select a project"
+      description="Choose a project from the list to view details and media."
+    />
+  );
+
+  return (
+    <>
+      <MasterDetailLayout split={isDesktop} list={listPane} detail={detailPane} />
 
       {selectedProjects.length > 0 ? (
-        <div className="fixed inset-x-0 bottom-16 z-40 border-t border-border bg-background/95 px-4 py-3 backdrop-blur-sm">
-          <div className="mx-auto flex max-w-lg items-center gap-2">
+        <div className="fixed inset-x-0 bottom-16 z-40 border-t border-border bg-background/95 px-4 py-3 backdrop-blur-sm md:bottom-0 md:left-16">
+          <div className="mx-auto flex max-w-lg items-center gap-2 md:max-w-none">
             <Button type="button" variant="ghost" size="sm" onClick={clearSelection}>
               Clear
             </Button>
@@ -161,7 +272,7 @@ export default function ProjectsPage() {
         <Button
           type="button"
           size="icon"
-          className="fixed right-4 bottom-20 z-40 h-14 w-14 rounded-full shadow-lg"
+          className="fixed right-4 bottom-20 z-40 h-14 w-14 rounded-full shadow-lg md:right-6 md:bottom-6"
           onClick={openCreateForm}
           aria-label="Add project"
         >
@@ -173,13 +284,16 @@ export default function ProjectsPage() {
         open={formOpen}
         onOpenChange={setFormOpen}
         project={editingProject}
+        onDeleted={
+          editingProject ? () => handleProjectDeleted(editingProject.id) : undefined
+        }
       />
       <ProjectShareSheet
         open={shareOpen}
         onOpenChange={setShareOpen}
         projects={selectedProjects}
       />
-    </div>
+    </>
   );
 }
 

@@ -23,8 +23,23 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { ProjectMediaUploader } from "@/components/projects/ProjectMediaUploader";
-import { useCreateProject, useUpdateProject } from "@/lib/queries/projects";
+import {
+  useCreateProject,
+  useDeleteProject,
+  useUpdateProject,
+} from "@/lib/queries/projects";
 import { PROJECT_STATUS_OPTIONS, type Project, type ProjectStatus } from "@/types";
 
 const projectSchema = z.object({
@@ -47,12 +62,15 @@ interface ProjectFormProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   project?: Project | null;
+  onDeleted?: () => void;
 }
 
-export function ProjectForm({ open, onOpenChange, project }: ProjectFormProps) {
+export function ProjectForm({ open, onOpenChange, project, onDeleted }: ProjectFormProps) {
   const createProject = useCreateProject();
   const updateProject = useUpdateProject();
+  const deleteProject = useDeleteProject();
   const [savedProject, setSavedProject] = useState<Project | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const activeProject = savedProject ?? project ?? null;
 
   const {
@@ -135,7 +153,21 @@ export function ProjectForm({ open, onOpenChange, project }: ProjectFormProps) {
     }
   }
 
-  const isPending = createProject.isPending || updateProject.isPending;
+  async function handleDelete() {
+    if (!activeProject) return;
+    try {
+      await deleteProject.mutateAsync(activeProject.id);
+      toast.success("Project deleted");
+      setDeleteOpen(false);
+      onOpenChange(false);
+      onDeleted?.();
+    } catch {
+      toast.error("Failed to delete project");
+    }
+  }
+
+  const isPending =
+    createProject.isPending || updateProject.isPending || deleteProject.isPending;
   const status = watch("status");
 
   return (
@@ -247,6 +279,42 @@ export function ProjectForm({ open, onOpenChange, project }: ProjectFormProps) {
         {activeProject && (
           <div className="mt-4 border-t border-border pt-4">
             <ProjectMediaUploader project={activeProject} />
+          </div>
+        )}
+
+        {activeProject && (
+          <div className="mt-6 border-t border-border pt-4">
+            <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+              <AlertDialogTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  disabled={isPending}
+                >
+                  Delete project
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent size="sm">
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete project?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Are you sure you want to delete {activeProject.name}? Media files will also be
+                    removed. This action cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    variant="destructive"
+                    onClick={handleDelete}
+                    disabled={deleteProject.isPending}
+                  >
+                    Delete
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </div>
         )}
       </SheetContent>
