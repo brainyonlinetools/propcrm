@@ -5,6 +5,7 @@ import Image from "next/image";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { cn } from "@/lib/utils";
 import { PROJECT_STATUS_LABELS, type Project, type ProjectMedia } from "@/types";
 
 interface ProjectCardProps {
@@ -12,6 +13,9 @@ interface ProjectCardProps {
   selected: boolean;
   onSelectedChange: (selected: boolean) => void;
   onEdit: () => void;
+  /** When set, primary content click opens/selects instead of editing. */
+  onOpen?: () => void;
+  highlighted?: boolean;
 }
 
 export function ProjectCard({
@@ -19,6 +23,8 @@ export function ProjectCard({
   selected,
   onSelectedChange,
   onEdit,
+  onOpen,
+  highlighted = false,
 }: ProjectCardProps) {
   const media = project.project_media ?? [];
   const cover = media[0];
@@ -31,9 +37,20 @@ export function ProjectCard({
     project.total_towers ? { label: "Towers", value: project.total_towers } : null,
   ].filter(Boolean) as { label: string; value: string }[];
 
+  function handleOpen() {
+    (onOpen ?? onEdit)();
+  }
+
   return (
-    <article className="overflow-hidden rounded-lg border border-border bg-card shadow-card transition-colors active:bg-muted/50">
-      <ProjectCover media={cover} projectName={project.name} />
+    <article
+      className={cn(
+        "overflow-hidden rounded-lg border border-border bg-card shadow-card transition-colors active:bg-muted/50",
+        highlighted && "ring-2 ring-primary/40"
+      )}
+    >
+      <button type="button" className="block w-full text-left" onClick={handleOpen}>
+        <ProjectCover media={cover} projectName={project.name} />
+      </button>
       <div className="flex flex-col gap-3 p-3">
         <div className="flex items-start gap-3">
           <Checkbox
@@ -42,7 +59,7 @@ export function ProjectCard({
             aria-label={`Select ${project.name}`}
             className="mt-1"
           />
-          <button type="button" className="min-w-0 flex-1 text-left" onClick={onEdit}>
+          <button type="button" className="min-w-0 flex-1 text-left" onClick={handleOpen}>
             <h3 className="truncate text-sm font-semibold">{project.name}</h3>
             {project.location && (
               <p className="line-clamp-2 text-xs text-muted-foreground">{project.location}</p>

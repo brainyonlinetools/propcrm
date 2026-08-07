@@ -360,7 +360,7 @@ describe("projectSharing", () => {
     expect(getShareableImageFiles(files)[0].name).toBe("photo.jpg");
   });
 
-  it("prefers image files when mixed media is shareable", () => {
+  it("shares photos and videos together when mixed media is shareable", () => {
     const files = [
       new File(["image"], "photo.jpg", { type: "image/jpeg" }),
       new File(["video"], "clip.mp4", { type: "video/mp4" }),
@@ -368,6 +368,24 @@ describe("projectSharing", () => {
     vi.stubGlobal("navigator", {
       share: vi.fn(),
       canShare: vi.fn().mockReturnValue(true),
+    });
+
+    const preferred = getPreferredShareableFiles(files);
+    expect(preferred).toHaveLength(2);
+    expect(preferred.map((file) => file.name)).toEqual(["photo.jpg", "clip.mp4"]);
+  });
+
+  it("falls back to images when mixed media cannot be shared", () => {
+    const files = [
+      new File(["image"], "photo.jpg", { type: "image/jpeg" }),
+      new File(["video"], "clip.mp4", { type: "video/mp4" }),
+    ];
+    vi.stubGlobal("navigator", {
+      share: vi.fn(),
+      canShare: vi.fn((data?: ShareData) => {
+        const sharedFiles = data?.files ?? [];
+        return sharedFiles.length > 0 && sharedFiles.every((file) => file.type.startsWith("image/"));
+      }),
     });
 
     const preferred = getPreferredShareableFiles(files);

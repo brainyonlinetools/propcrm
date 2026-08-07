@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { Plus, Search, Upload, X, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -11,13 +12,16 @@ import { UnitDetailPanel } from "@/components/inventory/UnitDetailPanel";
 import { UnitForm } from "@/components/inventory/UnitForm";
 import { BulkImportSheet } from "@/components/shared/BulkImportSheet";
 import { CollapsibleFilterSection } from "@/components/shared/CollapsibleFilterSection";
-import { ContactListRow } from "@/components/shared/ContactListRow";
 import {
   DetailEmptyState,
   MasterDetailLayout,
 } from "@/components/shared/MasterDetailLayout";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { PullToRefresh } from "@/components/shared/PullToRefresh";
+import {
+  ViewModeToggle,
+  type ListViewMode,
+} from "@/components/shared/ViewModeToggle";
 import { useIsDesktop } from "@/hooks/useIsDesktop";
 import { inventoryKey, useInventory } from "@/lib/queries/inventory";
 import { cn, formatCurrency } from "@/lib/utils";
@@ -27,6 +31,8 @@ const STATUSES: InventoryStatus[] = ["available", "blocked", "booked", "sold"];
 
 export default function InventoryPage() {
   const isDesktop = useIsDesktop();
+  const router = useRouter();
+  const [view, setView] = useState<ListViewMode>("table");
   const [search, setSearch] = useState("");
   const [projectFilter, setProjectFilter] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<InventoryStatus | null>(null);
@@ -78,11 +84,20 @@ export default function InventoryPage() {
 
   const activeFilterCount = [statusFilter, projectFilter, typeFilter].filter(Boolean).length;
   const activeProjectLabel = projectFilter;
+  const isGallery = view === "gallery";
 
   function clearFilters() {
     setStatusFilter(null);
     setProjectFilter(null);
     setTypeFilter(null);
+  }
+
+  function openUnit(unitId: string) {
+    if (isDesktop) {
+      setSelectedId(unitId);
+      return;
+    }
+    router.push(`/inventory/${unitId}`);
   }
 
   async function handleRefresh() {
@@ -93,14 +108,17 @@ export default function InventoryPage() {
     <header className="sticky top-0 z-40 shrink-0 border-b border-border bg-background/95 px-4 py-3 backdrop-blur-sm">
       <div className="flex items-center justify-between gap-2">
         <h1 className="text-lg font-semibold tracking-tight">Inventory</h1>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => setImportOpen(true)}
-          aria-label="Bulk import inventory"
-        >
-          <Upload />
-        </Button>
+        <div className="flex shrink-0 items-center gap-1">
+          <ViewModeToggle value={view} onChange={setView} />
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setImportOpen(true)}
+            aria-label="Bulk import inventory"
+          >
+            <Upload />
+          </Button>
+        </div>
       </div>
 
       <div className="relative mt-3">
@@ -221,66 +239,118 @@ export default function InventoryPage() {
   const listBody = (
     <PullToRefresh
       onRefresh={handleRefresh}
-      className={cn("flex-1", isDesktop ? "overflow-y-auto" : "px-4 py-4")}
+      className={cn("flex-1 px-4 py-4", isDesktop && "overflow-y-auto")}
     >
       {isLoading ? (
         <div
           className={cn(
-            isDesktop ? "flex flex-col gap-0 p-0" : "grid grid-cols-1 gap-3 min-[380px]:grid-cols-2"
+            isGallery
+              ? "grid grid-cols-1 gap-3 min-[380px]:grid-cols-2"
+              : "overflow-x-auto"
           )}
         >
           {Array.from({ length: 6 }).map((_, i) => (
             <Skeleton
               key={i}
-              className={cn("rounded-lg", isDesktop ? "mx-3 my-2 h-16" : "h-36")}
+              className={cn("rounded-lg", isGallery ? "h-56" : "h-12 w-full")}
             />
           ))}
         </div>
       ) : isError ? (
-        <div className={isDesktop ? "p-4" : undefined}>
-          <EmptyState
-            title="Could not load inventory"
-            description="Check your Supabase connection and apply the migration."
-            actionLabel="Try again"
-            onAction={handleRefresh}
-          />
-        </div>
+        <EmptyState
+          title="Could not load inventory"
+          description="Check your Supabase connection and apply the migration."
+          actionLabel="Try again"
+          onAction={handleRefresh}
+        />
       ) : filtered.length === 0 ? (
-        <div className={isDesktop ? "p-4" : undefined}>
-          <EmptyState
-            title={units.length === 0 ? "No units listed" : "No matching units"}
-            description={
-              units.length === 0
-                ? "Add units across Anand Prime Residences, Heights, and Vista."
-                : "Try adjusting your filters."
-            }
-            actionLabel={units.length === 0 ? "Add Unit" : undefined}
-            onAction={units.length === 0 ? () => setFormOpen(true) : undefined}
-          />
-        </div>
-      ) : isDesktop ? (
-        <div className="flex flex-col bg-card">
-          {filtered.map((unit) => {
-            const projectName =
-              (unit.custom_data?.project_name as string) ?? unit.projects?.name ?? undefined;
-            return (
-              <ContactListRow
-                key={unit.id}
-                name={unit.unit_number}
-                subtitle={[projectName, unit.unit_type].filter(Boolean).join(" · ") || undefined}
-                meta={unit.price != null ? formatCurrency(unit.price) : undefined}
-                badge={<StatusBadge status={unit.status} className="shrink-0" />}
-                selected={selectedId === unit.id}
-                onClick={() => setSelectedId(unit.id)}
-              />
-            );
-          })}
+        <EmptyState
+          title={units.length === 0 ? "No units listed" : "No matching units"}
+          description={
+            units.length === 0
+              ? "Add units across Anand Prime Residences, Heights, and Vista."
+              : "Try adjusting your filters."
+          }
+          actionLabel={units.length === 0 ? "Add Unit" : undefined}
+          onAction={units.length === 0 ? () => setFormOpen(true) : undefined}
+        />
+      ) : isGallery ? (
+        <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2 md:grid-cols-1">
+          {filtered.map((unit) => (
+            <UnitCard
+              key={unit.id}
+              unit={unit}
+              onSelect={isDesktop ? () => setSelectedId(unit.id) : undefined}
+              selected={isDesktop && selectedId === unit.id}
+            />
+          ))}
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2">
-          {filtered.map((unit) => (
-            <UnitCard key={unit.id} unit={unit} />
-          ))}
+        <div className="overflow-x-auto rounded-lg border border-border bg-card">
+          <table className="w-full min-w-[640px] border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
+                <th className="px-3 py-2.5 font-medium" scope="col">
+                  Unit
+                </th>
+                <th className="px-3 py-2.5 font-medium" scope="col">
+                  Project
+                </th>
+                <th className="px-3 py-2.5 font-medium" scope="col">
+                  Type
+                </th>
+                <th className="px-3 py-2.5 font-medium" scope="col">
+                  Area
+                </th>
+                <th className="px-3 py-2.5 font-medium" scope="col">
+                  Price
+                </th>
+                <th className="px-3 py-2.5 font-medium" scope="col">
+                  Status
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((unit) => {
+                const projectName =
+                  (unit.custom_data?.project_name as string) ??
+                  unit.projects?.name ??
+                  "—";
+                const isSelected = selectedId === unit.id;
+                return (
+                  <tr
+                    key={unit.id}
+                    className={cn(
+                      "cursor-pointer border-b border-border last:border-b-0",
+                      isDesktop && isSelected ? "bg-muted" : "hover:bg-muted/60"
+                    )}
+                    onClick={() => openUnit(unit.id)}
+                  >
+                    <td className="px-3 py-2.5 align-middle font-medium">
+                      {unit.unit_number}
+                    </td>
+                    <td className="max-w-[10rem] truncate px-3 py-2.5 align-middle text-muted-foreground">
+                      {projectName}
+                    </td>
+                    <td className="px-3 py-2.5 align-middle text-muted-foreground">
+                      {unit.unit_type ?? "—"}
+                    </td>
+                    <td className="px-3 py-2.5 align-middle text-muted-foreground">
+                      {unit.area_sqft != null
+                        ? `${unit.area_sqft.toLocaleString("en-IN")} sq.ft.`
+                        : "—"}
+                    </td>
+                    <td className="px-3 py-2.5 align-middle font-medium">
+                      {formatCurrency(unit.price)}
+                    </td>
+                    <td className="px-3 py-2.5 align-middle">
+                      <StatusBadge status={unit.status} className="shrink-0" />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
     </PullToRefresh>

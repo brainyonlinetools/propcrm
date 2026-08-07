@@ -10,12 +10,15 @@ import { ProjectCard } from "@/components/projects/ProjectCard";
 import { ProjectDetailPanel } from "@/components/projects/ProjectDetailPanel";
 import { ProjectForm } from "@/components/projects/ProjectForm";
 import { ProjectShareSheet } from "@/components/projects/ProjectShareSheet";
-import { ContactListRow } from "@/components/shared/ContactListRow";
 import {
   DetailEmptyState,
   MasterDetailLayout,
 } from "@/components/shared/MasterDetailLayout";
 import { PullToRefresh } from "@/components/shared/PullToRefresh";
+import {
+  ViewModeToggle,
+  type ListViewMode,
+} from "@/components/shared/ViewModeToggle";
 import { useIsDesktop } from "@/hooks/useIsDesktop";
 import { projectsKey, useProjects } from "@/lib/queries/projects";
 import { cn } from "@/lib/utils";
@@ -25,6 +28,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 
 export default function ProjectsPage() {
   const isDesktop = useIsDesktop();
+  const [view, setView] = useState<ListViewMode>("table");
   const [search, setSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -68,6 +72,8 @@ export default function ProjectsPage() {
     () => filtered.find((project) => project.id === selectedId) ?? null,
     [filtered, selectedId]
   );
+
+  const isGallery = view === "gallery";
 
   function openCreateForm() {
     setEditingProject(null);
@@ -114,15 +120,18 @@ export default function ProjectsPage() {
   const listHeader = (
     <header className="sticky top-0 z-40 shrink-0 border-b border-border bg-background/95 px-4 py-3 backdrop-blur-sm">
       <div className="flex items-center justify-between gap-2">
-        <div>
+        <div className="min-w-0 flex-1">
           <h1 className="text-lg font-semibold tracking-tight">Projects</h1>
           <p className="text-xs text-muted-foreground">
             Manage client-ready project details and media.
           </p>
         </div>
-        <Button variant="ghost" size="icon" onClick={openCreateForm} aria-label="Add project">
-          <Plus />
-        </Button>
+        <div className="flex shrink-0 items-center gap-1">
+          <ViewModeToggle value={view} onChange={setView} />
+          <Button variant="ghost" size="icon" onClick={openCreateForm} aria-label="Add project">
+            <Plus />
+          </Button>
+        </div>
       </div>
 
       <div className="relative mt-3">
@@ -140,78 +149,43 @@ export default function ProjectsPage() {
   const listBody = (
     <PullToRefresh
       onRefresh={handleRefresh}
-      className={cn("flex-1", isDesktop ? "overflow-y-auto" : "px-4 py-4")}
+      className={cn("flex-1 px-4 py-4", isDesktop && "overflow-y-auto")}
     >
       {isLoading ? (
         <div
           className={cn(
-            isDesktop ? "flex flex-col" : "grid grid-cols-1 gap-3 min-[380px]:grid-cols-2"
+            isGallery
+              ? "grid grid-cols-1 gap-3 min-[380px]:grid-cols-2"
+              : "overflow-x-auto"
           )}
         >
           {Array.from({ length: 4 }).map((_, index) => (
             <Skeleton
               key={index}
-              className={cn("rounded-lg", isDesktop ? "mx-3 my-2 h-16" : "h-64")}
+              className={cn("rounded-lg", isGallery ? "h-64" : "h-12 w-full")}
             />
           ))}
         </div>
       ) : isError ? (
-        <div className={isDesktop ? "p-4" : undefined}>
-          <EmptyState
-            title="Could not load projects"
-            description="Check your Supabase connection and apply the latest migration."
-            actionLabel="Try again"
-            onAction={handleRefresh}
-          />
-        </div>
+        <EmptyState
+          title="Could not load projects"
+          description="Check your Supabase connection and apply the latest migration."
+          actionLabel="Try again"
+          onAction={handleRefresh}
+        />
       ) : filtered.length === 0 ? (
-        <div className={isDesktop ? "p-4" : undefined}>
-          <EmptyState
-            title={projects.length === 0 ? "No projects yet" : "No matching projects"}
-            description={
-              projects.length === 0
-                ? "Add your first project with client-ready details, photos, and videos."
-                : "Try a different search term."
-            }
-            actionLabel={projects.length === 0 ? "Add Project" : undefined}
-            onAction={projects.length === 0 ? openCreateForm : undefined}
-          />
-        </div>
-      ) : isDesktop ? (
-        <div className="flex flex-col bg-card">
-          {filtered.map((project) => (
-            <div key={project.id} className="relative flex items-stretch border-b border-border">
-              <div className="flex items-center pl-3">
-                <Checkbox
-                  checked={selectedIds.has(project.id)}
-                  onCheckedChange={(checked) =>
-                    updateSelection(project.id, Boolean(checked))
-                  }
-                  aria-label={`Select ${project.name}`}
-                />
-              </div>
-              <ContactListRow
-                className="border-b-0"
-                name={project.name}
-                subtitle={project.location ?? project.region ?? undefined}
-                meta={
-                  project.status ? PROJECT_STATUS_LABELS[project.status] : undefined
-                }
-                badge={
-                  (project.project_media?.length ?? 0) > 0 ? (
-                    <Badge variant="secondary" className="text-[10px]">
-                      {project.project_media!.length}
-                    </Badge>
-                  ) : undefined
-                }
-                selected={selectedId === project.id}
-                onClick={() => setSelectedId(project.id)}
-              />
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2">
+        <EmptyState
+          title={projects.length === 0 ? "No projects yet" : "No matching projects"}
+          description={
+            projects.length === 0
+              ? "Add your first project with client-ready details, photos, and videos."
+              : "Try a different search term."
+          }
+          actionLabel={projects.length === 0 ? "Add Project" : undefined}
+          onAction={projects.length === 0 ? openCreateForm : undefined}
+        />
+      ) : isGallery ? (
+        <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2 md:grid-cols-1">
           {filtered.map((project) => (
             <ProjectCard
               key={project.id}
@@ -219,8 +193,86 @@ export default function ProjectsPage() {
               selected={selectedIds.has(project.id)}
               onSelectedChange={(selected) => updateSelection(project.id, selected)}
               onEdit={() => openEditForm(project)}
+              onOpen={isDesktop ? () => setSelectedId(project.id) : undefined}
+              highlighted={isDesktop && selectedId === project.id}
             />
           ))}
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-border bg-card">
+          <table className="w-full min-w-[560px] border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
+                <th className="w-10 px-3 py-2.5 font-medium" scope="col">
+                  <span className="sr-only">Select</span>
+                </th>
+                <th className="px-3 py-2.5 font-medium" scope="col">
+                  Name
+                </th>
+                <th className="px-3 py-2.5 font-medium" scope="col">
+                  Location
+                </th>
+                <th className="px-3 py-2.5 font-medium" scope="col">
+                  Status
+                </th>
+                <th className="px-3 py-2.5 font-medium" scope="col">
+                  Media
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((project) => {
+                const isSelected = selectedId === project.id;
+                return (
+                  <tr
+                    key={project.id}
+                    className={cn(
+                      "cursor-pointer border-b border-border last:border-b-0",
+                      isDesktop && isSelected ? "bg-muted" : "hover:bg-muted/60"
+                    )}
+                    onClick={() => {
+                      if (isDesktop) {
+                        setSelectedId(project.id);
+                      } else {
+                        openEditForm(project);
+                      }
+                    }}
+                  >
+                    <td
+                      className="px-3 py-2.5 align-middle"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <Checkbox
+                        checked={selectedIds.has(project.id)}
+                        onCheckedChange={(checked) =>
+                          updateSelection(project.id, Boolean(checked))
+                        }
+                        aria-label={`Select ${project.name}`}
+                      />
+                    </td>
+                    <td className="max-w-[12rem] truncate px-3 py-2.5 align-middle font-medium md:max-w-none">
+                      {project.name}
+                    </td>
+                    <td className="max-w-[10rem] truncate px-3 py-2.5 align-middle text-muted-foreground">
+                      {project.location ?? project.region ?? "—"}
+                    </td>
+                    <td className="px-3 py-2.5 align-middle text-muted-foreground">
+                      {project.status ? PROJECT_STATUS_LABELS[project.status] : "—"}
+                    </td>
+                    <td className="px-3 py-2.5 align-middle">
+                      {(project.project_media?.length ?? 0) > 0 ? (
+                        <Badge variant="secondary" className="text-[10px]">
+                          {project.project_media!.length}
+                        </Badge>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
     </PullToRefresh>

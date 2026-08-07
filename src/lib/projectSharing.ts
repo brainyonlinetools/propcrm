@@ -240,17 +240,22 @@ export async function copyTextToClipboard(text: string): Promise<boolean> {
 
 export type ProjectShareResult = "whatsapp" | "whatsapp-with-photos";
 
-/** Prefer images when present; WhatsApp is more reliable with image-only shares. */
+/**
+ * Share photos and videos together when the browser allows it.
+ * Fall back to images only if mixed media (or videos) cannot be shared.
+ */
 export function getPreferredShareableFiles(files: File[]): File[] {
   if (files.length === 0) return [];
+
+  if (canShareProjectMediaFiles(files)) {
+    return files;
+  }
 
   const imageFiles = getShareableImageFiles(files);
   if (imageFiles.length > 0 && canShareProjectMediaFiles(imageFiles)) {
     return imageFiles;
   }
-  if (canShareProjectMediaFiles(files)) {
-    return files;
-  }
+
   return [];
 }
 

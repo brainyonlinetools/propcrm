@@ -55,11 +55,11 @@ export function ProjectShareSheet({
 
       if (result === "whatsapp-with-photos") {
         toast.success(
-          "Photos attached — paste project details from clipboard as the caption."
+          "Photos & videos attached — paste project details from clipboard as the caption."
         );
       } else if (mediaCount > 0) {
         toast.success(
-          "WhatsApp opened with details only; attach downloaded photos if needed."
+          "WhatsApp opened with details only; attach downloaded photos/videos if needed."
         );
       } else {
         toast.success("WhatsApp opened with project details.");

@@ -63,7 +63,8 @@ export function useInventory() {
         .select(
           `
           *,
-          projects(id, name, location)
+          projects(id, name, location),
+          inventory_media(*)
         `
         )
         .order("acquired_date", { ascending: false, nullsFirst: false })
