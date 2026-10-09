@@ -1,5 +1,9 @@
-import type { Json } from "@/types/database";
+import { randomUUID } from "node:crypto";
+import type { Database, Json } from "@/types/database";
 import type { InventoryStatus, PipelineStage, Project } from "@/types";
+
+type LeadRowInsert = Database["public"]["Tables"]["leads"]["Insert"];
+type UnitRowInsert = Database["public"]["Tables"]["inventory"]["Insert"];
 import { createSupabaseAdmin } from "@/lib/supabase-admin";
 import { readSheetTab, updateLeadStatusColumn } from "@/lib/googleSheets";
 import {
@@ -35,6 +39,101 @@ function emptyTabResult(): TabSyncResult {
   return { created: 0, repointed: 0, warnings: [], errors: [] };
 }
 
+// Bulk sheets (1000+ rows) exceed serverless timeouts with one round-trip
+// per row, so creates go out in chunks and per-row writes run concurrently.
+const INSERT_CHUNK_SIZE = 500;
+const WRITE_CONCURRENCY = 10;
+
+export function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
+export interface FallbackFailure<T> {
+  item: T;
+  message: string;
+}
+
+/**
+ * Insert in chunks for speed; when a chunk fails, retry it row by row so
+ * one bad row can't sink the whole chunk.
+ */
+export async function insertWithFallback<T>(
+  items: T[],
+  chunkSize: number,
+  insertChunk: (chunk: T[]) => Promise<void>,
+  insertSingle: (item: T) => Promise<void>
+): Promise<{ succeeded: T[]; failed: FallbackFailure<T>[] }> {
+  const succeeded: T[] = [];
+  const failed: FallbackFailure<T>[] = [];
+  for (const chunk of chunkArray(items, chunkSize)) {
+    try {
+      await insertChunk(chunk);
+      succeeded.push(...chunk);
+    } catch {
+      for (const item of chunk) {
+        try {
+          await insertSingle(item);
+          succeeded.push(item);
+        } catch (err) {
+          failed.push({
+            item,
+            message: err instanceof Error ? err.message : "Insert failed",
+          });
+        }
+      }
+    }
+  }
+  return { succeeded, failed };
+}
+
+/**
+ * Index already-imported sheet rows by row number for one sheet/tab.
+ * Used so rows without any contact info (which can never match by
+ * phone/email) still re-sync idempotently instead of duplicating.
+ */
+export function buildTrackedRowMap(
+  existing: { id: string; custom_data: unknown }[],
+  sheetId: string,
+  sheetTab: string
+): Map<number, string> {
+  const map = new Map<number, string>();
+  for (const lead of existing) {
+    const tracking = lead.custom_data as Record<string, unknown> | null;
+    const row = tracking?.sheet_row;
+    if (
+      tracking?.sheet_id === sheetId &&
+      tracking?.sheet_tab === sheetTab &&
+      typeof row === "number" &&
+      !map.has(row)
+    ) {
+      map.set(row, lead.id);
+    }
+  }
+  return map;
+}
+
+/** Run per-row writes with bounded parallelism. */
+export async function mapWithConcurrency<T>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<void>
+): Promise<void> {
+  const workers = Math.max(1, Math.min(limit, items.length));
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: workers }, async () => {
+      while (next < items.length) {
+        const index = next++;
+        await fn(items[index], index);
+      }
+    })
+  );
+}
+
 function mergeTracking(existing: unknown, tracking: Record<string, unknown>) {
   const base =
     existing && typeof existing === "object"
@@ -50,11 +149,33 @@ interface ExistingLead {
   custom_data: unknown;
 }
 
+interface PendingLeadCreate {
+  id: string;
+  sheetRow: number;
+  lead: LeadRowInsert;
+  note: string | null;
+  ref: ExistingLead;
+}
+
+interface RepointUpdate {
+  id: string;
+  sheetRow: number;
+  customData: Record<string, unknown>;
+}
+
 interface ExistingUnit {
   id: string;
   project_id: string | null;
   unit_number: string;
   custom_data: unknown;
+}
+
+interface PendingUnitCreate {
+  id: string;
+  sheetRow: number;
+  unit: UnitRowInsert;
+  note: string | null;
+  ref: ExistingUnit;
 }
 
 function unitMatchKey(projectId: string | null | undefined, unitNumber: string | null | undefined) {
@@ -86,6 +207,10 @@ export async function syncLeadsFromSheet(): Promise<TabSyncResult> {
     if (email && !byEmail.has(email)) byEmail.set(email, lead);
   }
 
+  const pending = new Map<string, PendingLeadCreate>();
+  const repoints: RepointUpdate[] = [];
+  const trackedByRow = buildTrackedRowMap((existing ?? []) as ExistingLead[], sheetId, tab);
+
   for (const { sheetRow, row } of rows) {
     const mapped = mapConnectedLeadRow(row, {
       sheetRow,
@@ -101,6 +226,11 @@ export async function syncLeadsFromSheet(): Promise<TabSyncResult> {
       result.warnings.push(`${tab} row ${sheetRow}: ${warning}`);
     }
 
+    if (!mapped.lead.phone && !mapped.lead.email && trackedByRow.has(sheetRow)) {
+      result.repointed++;
+      continue;
+    }
+
     const phoneKey = normalizePhoneKey(mapped.lead.phone);
     const email = mapped.lead.email?.toLowerCase() ?? null;
     const match =
@@ -109,38 +239,73 @@ export async function syncLeadsFromSheet(): Promise<TabSyncResult> {
       null;
 
     if (!match) {
-      const { data, error } = await supabase
-        .from("leads")
-        .insert({ ...mapped.lead, custom_data: (mapped.lead.custom_data ?? {}) as Json })
-        .select("id")
-        .single();
-      if (error) {
-        result.errors.push(`${tab} row ${sheetRow}: ${error.message}`);
-        continue;
-      }
-      if (mapped.note) {
-        await supabase
-          .from("lead_notes")
-          .insert({ lead_id: data.id, content: mapped.note, note_type: "note" });
-      }
-      result.created++;
-      const created: ExistingLead = { id: data.id, phone: mapped.lead.phone ?? null, email: mapped.lead.email ?? null, custom_data: mapped.lead.custom_data };
-      if (phoneKey && !byPhone.has(phoneKey)) byPhone.set(phoneKey, created);
-      if (email && !byEmail.has(email)) byEmail.set(email, created);
+      // Client-generated id so later rows can match this lead (and its
+      // notes can reference it) before the chunk is flushed.
+      const id = randomUUID();
+      const lead: LeadRowInsert = {
+        ...mapped.lead,
+        id,
+        custom_data: (mapped.lead.custom_data ?? {}) as Json,
+      };
+      const ref: ExistingLead = {
+        id,
+        phone: lead.phone ?? null,
+        email: lead.email ?? null,
+        custom_data: lead.custom_data,
+      };
+      pending.set(id, { id, sheetRow, lead, note: mapped.note, ref });
+      trackedByRow.set(sheetRow, id);
+      if (phoneKey && !byPhone.has(phoneKey)) byPhone.set(phoneKey, ref);
+      if (email && !byEmail.has(email)) byEmail.set(email, ref);
       continue;
     }
 
     // Re-point row tracking only; never overwrite CRM edits from the sheet.
     const merged = mergeTracking(match.custom_data, buildSheetTracking(sheetId, tab, sheetRow));
+    const unflushed = pending.get(match.id);
+    if (unflushed) {
+      unflushed.lead.custom_data = merged as Json;
+      unflushed.ref.custom_data = merged;
+      result.repointed++;
+    } else {
+      repoints.push({ id: match.id, sheetRow, customData: merged });
+    }
+  }
+
+  await mapWithConcurrency(repoints, WRITE_CONCURRENCY, async (repoint) => {
     const { error } = await supabase
       .from("leads")
-      .update({ custom_data: merged as Json })
-      .eq("id", match.id);
+      .update({ custom_data: repoint.customData as Json })
+      .eq("id", repoint.id);
     if (error) {
-      result.errors.push(`${tab} row ${sheetRow}: ${error.message}`);
+      result.errors.push(`${tab} row ${repoint.sheetRow}: ${error.message}`);
     } else {
       result.repointed++;
     }
+  });
+
+  const { succeeded, failed } = await insertWithFallback(
+    [...pending.values()],
+    INSERT_CHUNK_SIZE,
+    async (chunk) => {
+      const { error } = await supabase.from("leads").insert(chunk.map((c) => c.lead));
+      if (error) throw new Error(error.message);
+    },
+    async (item) => {
+      const { error } = await supabase.from("leads").insert(item.lead);
+      if (error) throw new Error(error.message);
+    }
+  );
+  result.created += succeeded.length;
+  for (const failure of failed) {
+    result.errors.push(`${tab} row ${failure.item.sheetRow}: ${failure.message}`);
+  }
+
+  const notes = succeeded.flatMap((c) =>
+    c.note ? [{ lead_id: c.id, content: c.note, note_type: "note" as const }] : []
+  );
+  if (notes.length > 0) {
+    await supabase.from("lead_notes").insert(notes);
   }
 
   return result;
@@ -168,6 +333,9 @@ export async function syncInventoryFromSheet(): Promise<TabSyncResult> {
     if (!byUnit.has(key)) byUnit.set(key, unit);
   }
 
+  const pending = new Map<string, PendingUnitCreate>();
+  const repoints: RepointUpdate[] = [];
+
   for (const { sheetRow, row } of rows) {
     const mapped = mapConnectedInventoryRow(row, {
       sheetRow,
@@ -187,40 +355,68 @@ export async function syncInventoryFromSheet(): Promise<TabSyncResult> {
     const match = byUnit.get(key) ?? null;
 
     if (!match) {
-      const { data, error } = await supabase
-        .from("inventory")
-        .insert({ ...mapped.unit, custom_data: (mapped.unit.custom_data ?? {}) as Json })
-        .select("id")
-        .single();
-      if (error) {
-        result.errors.push(`${tab} row ${sheetRow}: ${error.message}`);
-        continue;
-      }
-      if (mapped.note) {
-        await supabase
-          .from("inventory_notes")
-          .insert({ inventory_id: data.id, content: mapped.note, note_type: "note" });
-      }
-      result.created++;
-      byUnit.set(key, {
-        id: data.id,
-        project_id: mapped.unit.project_id ?? null,
-        unit_number: mapped.unit.unit_number,
-        custom_data: mapped.unit.custom_data,
-      });
+      const id = randomUUID();
+      const unit: UnitRowInsert = {
+        ...mapped.unit,
+        id,
+        custom_data: (mapped.unit.custom_data ?? {}) as Json,
+      };
+      const ref: ExistingUnit = {
+        id,
+        project_id: unit.project_id ?? null,
+        unit_number: unit.unit_number,
+        custom_data: unit.custom_data,
+      };
+      pending.set(id, { id, sheetRow, unit, note: mapped.note, ref });
+      byUnit.set(key, ref);
       continue;
     }
 
     const merged = mergeTracking(match.custom_data, buildSheetTracking(sheetId, tab, sheetRow));
+    const unflushed = pending.get(match.id);
+    if (unflushed) {
+      unflushed.unit.custom_data = merged as Json;
+      unflushed.ref.custom_data = merged;
+      result.repointed++;
+    } else {
+      repoints.push({ id: match.id, sheetRow, customData: merged });
+    }
+  }
+
+  await mapWithConcurrency(repoints, WRITE_CONCURRENCY, async (repoint) => {
     const { error } = await supabase
       .from("inventory")
-      .update({ custom_data: merged as Json })
-      .eq("id", match.id);
+      .update({ custom_data: repoint.customData as Json })
+      .eq("id", repoint.id);
     if (error) {
-      result.errors.push(`${tab} row ${sheetRow}: ${error.message}`);
+      result.errors.push(`${tab} row ${repoint.sheetRow}: ${error.message}`);
     } else {
       result.repointed++;
     }
+  });
+
+  const { succeeded, failed } = await insertWithFallback(
+    [...pending.values()],
+    INSERT_CHUNK_SIZE,
+    async (chunk) => {
+      const { error } = await supabase.from("inventory").insert(chunk.map((c) => c.unit));
+      if (error) throw new Error(error.message);
+    },
+    async (item) => {
+      const { error } = await supabase.from("inventory").insert(item.unit);
+      if (error) throw new Error(error.message);
+    }
+  );
+  result.created += succeeded.length;
+  for (const failure of failed) {
+    result.errors.push(`${tab} row ${failure.item.sheetRow}: ${failure.message}`);
+  }
+
+  const notes = succeeded.flatMap((c) =>
+    c.note ? [{ inventory_id: c.id, content: c.note, note_type: "note" as const }] : []
+  );
+  if (notes.length > 0) {
+    await supabase.from("inventory_notes").insert(notes);
   }
 
   return result;
@@ -270,13 +466,13 @@ async function writeBackLeadStages(): Promise<WriteBackResult> {
       { sheetName: tab, statusColumn: "Stage" }
     );
     const syncedAt = new Date().toISOString();
-    for (const { leadId } of updates) {
+    await mapWithConcurrency(updates, WRITE_CONCURRENCY, async ({ leadId }) => {
       const lead = (leads as TrackedLead[]).find((l) => l.id === leadId);
       await supabase
         .from("leads")
         .update({ custom_data: { ...(lead?.custom_data ?? {}), sheet_status_synced_at: syncedAt } as Json })
         .eq("id", leadId);
-    }
+    });
   }
 
   return { synced: updates.length, skipped };
@@ -312,13 +508,13 @@ async function writeBackInventoryStatuses(): Promise<WriteBackResult> {
       { sheetName: tab, statusColumn: "Status" }
     );
     const syncedAt = new Date().toISOString();
-    for (const { unitId } of updates) {
+    await mapWithConcurrency(updates, WRITE_CONCURRENCY, async ({ unitId }) => {
       const unit = (units as TrackedUnit[]).find((u) => u.id === unitId);
       await supabase
         .from("inventory")
         .update({ custom_data: { ...(unit?.custom_data ?? {}), sheet_status_synced_at: syncedAt } as Json })
         .eq("id", unitId);
-    }
+    });
   }
 
   return { synced: updates.length, skipped };

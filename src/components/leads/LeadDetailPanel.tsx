@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Copy, Pencil } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ArrowLeft, Copy, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,13 +28,24 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { DynamicFieldRenderer } from "@/components/shared/DynamicFieldRenderer";
 import { StageBadge } from "@/components/shared/StatusBadge";
 import { CallButton } from "@/components/shared/CallButton";
 import { WhatsAppButton } from "@/components/shared/WhatsAppButton";
 import { LeadForm } from "@/components/leads/LeadForm";
 import { TaskItem } from "@/components/tasks/TaskItem";
-import { useLead, useUpdateLead } from "@/lib/queries/leads";
+import { useDeleteLead, useLead, useUpdateLead } from "@/lib/queries/leads";
 import { usePipelineStages } from "@/lib/queries/pipelineStages";
 import { useInventory } from "@/lib/queries/inventory";
 import {
@@ -50,17 +62,21 @@ interface LeadDetailPanelProps {
   id: string;
   /** Hide back link when shown inside the desktop split pane. */
   embedded?: boolean;
+  onDeleted?: () => void;
 }
 
-export function LeadDetailPanel({ id, embedded = false }: LeadDetailPanelProps) {
+export function LeadDetailPanel({ id, embedded = false, onDeleted }: LeadDetailPanelProps) {
+  const router = useRouter();
   const { data: lead, isLoading } = useLead(id);
   const { data: stages = [] } = usePipelineStages();
   const { data: notes = [] } = useLeadNotes(id);
   const { data: tasks = [] } = useLeadTasks(id);
   const { data: inventory = [] } = useInventory();
   const updateLead = useUpdateLead();
+  const deleteLead = useDeleteLead();
   const createNote = useCreateLeadNote();
   const createTask = useCreateTask();
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const [editOpen, setEditOpen] = useState(false);
   const [noteType, setNoteType] = useState<NoteType>("note");
@@ -163,6 +179,23 @@ export function LeadDetailPanel({ id, embedded = false }: LeadDetailPanelProps) 
     }
   }
 
+  async function handleDelete() {
+    try {
+      const result = await deleteLead.mutateAsync(id);
+      toast.success(result.sheetCleared ? "Lead deleted from app and sheet" : "Lead deleted");
+      if (result.warning) toast.warning(result.warning);
+      if (onDeleted) {
+        onDeleted();
+      } else {
+        router.push("/leads");
+      }
+    } catch {
+      toast.error("Failed to delete lead");
+    }
+  }
+
+  const isSheetTracked = lead.custom_data?.imported_from_sheet === true;
+
   return (
     <div className="flex flex-col gap-6 p-4">
       <div className="flex items-center gap-2">
@@ -177,6 +210,28 @@ export function LeadDetailPanel({ id, embedded = false }: LeadDetailPanelProps) 
         <Button variant="ghost" size="icon" onClick={() => setEditOpen(true)}>
           <Pencil />
         </Button>
+        <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+          <AlertDialogTrigger asChild>
+            <Button variant="ghost" size="icon" aria-label="Delete lead">
+              <Trash2 className="text-destructive" />
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent size="sm">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete lead?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to delete {lead.name}? This action cannot be undone.
+                {isSheetTracked && " Its row will also be removed from the connected sheet."}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction variant="destructive" onClick={handleDelete}>
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
 
       <section className="flex flex-col gap-3">

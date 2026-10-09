@@ -32,6 +32,16 @@ describe("parseSheetDate", () => {
     expect(parseSheetDate("not a date")).toBeNull();
     expect(parseSheetDate("2026-13-45")).toBeNull();
   });
+
+  it("parses two-digit-year day-first dates", () => {
+    expect(parseSheetDate("24/11/24")).toBe("2024-11-24");
+    expect(parseSheetDate("22/1/25")).toBe("2025-01-22");
+    expect(parseSheetDate("26-5-26")).toBe("2026-05-26");
+    expect(parseSheetDate("26.5.26")).toBe("2026-05-26");
+    expect(parseSheetDate("09/10/68")).toBe("2068-10-09");
+    expect(parseSheetDate("09/10/69")).toBe("1969-10-09");
+    expect(parseSheetDate("32/13/24")).toBeNull();
+  });
 });
 
 describe("parseSheetPhone", () => {
@@ -110,10 +120,12 @@ describe("mapConnectedLeadRow", () => {
     });
   });
 
-  it("requires a name", () => {
-    const result = mapConnectedLeadRow({ Phone: "9876543210" }, opts);
-    expect(result.lead).toBeNull();
-    expect(result.error).toBe("Name is required");
+  it("assigns a placeholder name instead of skipping nameless rows", () => {
+    const { lead, warnings, error } = mapConnectedLeadRow({ Phone: "9876543210" }, opts);
+    expect(error).toBeUndefined();
+    expect(lead?.name).toBe("Lead 2");
+    expect(lead?.phone).toBe("9876543210");
+    expect(warnings).toEqual(['Missing name, used "Lead 2"']);
   });
 
   it("falls back to the default stage with a warning", () => {
@@ -144,6 +156,19 @@ describe("mapConnectedLeadRow", () => {
     expect(lead?.custom_data).toMatchObject({
       additional_phones: ["9822222222"],
     });
+  });
+
+  it("normalizes short-year dates and warns on unparsable ones", () => {
+    const { lead, warnings } = mapConnectedLeadRow(
+      { Name: "X", Date: "24/11/24" },
+      opts
+    );
+    expect(lead?.acquired_date).toBe("2024-11-24");
+    expect(warnings).toEqual([]);
+
+    const bad = mapConnectedLeadRow({ Name: "X", Date: "someday" }, opts);
+    expect(bad.lead?.acquired_date).toBeNull();
+    expect(bad.warnings).toEqual(['Could not parse date "someday"']);
   });
 });
 
@@ -207,6 +232,15 @@ describe("mapConnectedInventoryRow", () => {
     );
     expect(result.unit).toBeNull();
     expect(result.error).toBe('Unknown project "Unknown Towers"');
+  });
+
+  it("warns on unparsable dates but still maps", () => {
+    const { unit, warnings } = mapConnectedInventoryRow(
+      { "Unit Number": "A-1", Date: "someday" },
+      opts
+    );
+    expect(unit?.acquired_date).toBeNull();
+    expect(warnings).toEqual(['Could not parse date "someday"']);
   });
 
   it("defaults invalid status with a warning", () => {

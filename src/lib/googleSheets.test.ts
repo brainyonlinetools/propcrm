@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeSheetsError } from "./googleSheets";
+import { describeSheetsError, sheetRowMatchesIdentity } from "./googleSheets";
 
 function gaxiosLike(message: string, code: unknown, status: unknown): Error {
   return Object.assign(new Error(message), { code, status });
@@ -30,5 +30,56 @@ describe("describeSheetsError", () => {
 
   it("passes unrelated errors through untouched", () => {
     expect(describeSheetsError(new Error("boom"), { tab: "Leads" })).toBe("boom");
+  });
+});
+
+describe("sheetRowMatchesIdentity", () => {
+  it("matches phones across formatting variants", () => {
+    expect(
+      sheetRowMatchesIdentity(["Name", "Phone"], ["X", "p:+91 98765 43210"], [
+        { header: "Phone", expected: "919876543210", kind: "phone" },
+      ])
+    ).toBe(true);
+  });
+
+  it("rejects phone mismatches", () => {
+    expect(
+      sheetRowMatchesIdentity(["Name", "Phone"], ["X", "9811111111"], [
+        { header: "Phone", expected: "9876543210", kind: "phone" },
+      ])
+    ).toBe(false);
+  });
+
+  it("matches emails case-insensitively with case-insensitive headers", () => {
+    expect(
+      sheetRowMatchesIdentity(["name", "email"], ["X", "User@Example.com"], [
+        { header: "Email", expected: "user@example.com", kind: "text" },
+      ])
+    ).toBe(true);
+  });
+
+  it("requires every check to pass", () => {
+    const headers = ["Phone", "Email"];
+    const values = ["9876543210", "other@example.com"];
+    expect(
+      sheetRowMatchesIdentity(headers, values, [
+        { header: "Phone", expected: "9876543210", kind: "phone" },
+        { header: "Email", expected: "user@example.com", kind: "text" },
+      ])
+    ).toBe(false);
+  });
+
+  it("fails on missing columns or empty cells, passes with no checks", () => {
+    expect(
+      sheetRowMatchesIdentity(["Name"], ["X"], [
+        { header: "Phone", expected: "9876543210", kind: "phone" },
+      ])
+    ).toBe(false);
+    expect(
+      sheetRowMatchesIdentity(["Phone"], [""], [
+        { header: "Phone", expected: "9876543210", kind: "phone" },
+      ])
+    ).toBe(false);
+    expect(sheetRowMatchesIdentity(["Phone"], [""], [])).toBe(true);
   });
 });

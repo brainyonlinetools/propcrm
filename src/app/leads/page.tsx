@@ -624,7 +624,12 @@ export default function LeadsPage() {
 
   const detailPane = selectedId ? (
     <div className="h-full overflow-y-auto bg-background">
-      <LeadDetailPanel key={selectedId} id={selectedId} embedded />
+      <LeadDetailPanel
+        key={selectedId}
+        id={selectedId}
+        embedded
+        onDeleted={() => setSelectedId(null)}
+      />
     </div>
   ) : (
     <DetailEmptyState

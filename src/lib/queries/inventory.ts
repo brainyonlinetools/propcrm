@@ -264,32 +264,27 @@ export function useUpdateInventory() {
   });
 }
 
+export interface DeleteInventoryResult {
+  id: string;
+  warning?: string;
+  sheetCleared?: boolean;
+}
+
 export function useDeleteInventory() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (id: string) => {
-      const { data: media, error: mediaError } = await supabase
-        .from("inventory_media")
-        .select("storage_path")
-        .eq("inventory_id", id);
-
-      if (!mediaError && media && media.length > 0) {
-        const paths = media
-          .map((item) => item.storage_path)
-          .filter((path): path is string => Boolean(path));
-        if (paths.length > 0) {
-          await supabase.storage.from(INVENTORY_MEDIA_BUCKET).remove(paths);
-        }
-      }
-
-      const { error } = await supabase.from("inventory").delete().eq("id", id);
-      if (error) throw error;
-      return id;
+    mutationFn: async (id: string): Promise<DeleteInventoryResult> => {
+      const res = await fetch(`/api/inventory/${id}`, { method: "DELETE" });
+      const body = (await res.json().catch(() => ({}))) as Omit<DeleteInventoryResult, "id"> & {
+        error?: string;
+      };
+      if (!res.ok) throw new Error(body.error ?? "Failed to delete unit");
+      return { id, ...body };
     },
-    onSuccess: (id) => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: inventoryKey });
-      queryClient.removeQueries({ queryKey: inventoryItemKey(id) });
-      queryClient.removeQueries({ queryKey: inventoryMediaKey(id) });
+      queryClient.removeQueries({ queryKey: inventoryItemKey(result.id) });
+      queryClient.removeQueries({ queryKey: inventoryMediaKey(result.id) });
     },
   });
 }

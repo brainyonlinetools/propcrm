@@ -267,12 +267,21 @@ export function useBulkUpdateLeadStage() {
   });
 }
 
+export interface DeleteLeadResult {
+  warning?: string;
+  sheetCleared?: boolean;
+}
+
 export function useDeleteLead() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from("leads").delete().eq("id", id);
-      if (error) throw error;
+    mutationFn: async (id: string): Promise<DeleteLeadResult> => {
+      const res = await fetch(`/api/leads/${id}`, { method: "DELETE" });
+      const body = (await res.json().catch(() => ({}))) as DeleteLeadResult & {
+        error?: string;
+      };
+      if (!res.ok) throw new Error(body.error ?? "Failed to delete lead");
+      return body;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: leadsKey });

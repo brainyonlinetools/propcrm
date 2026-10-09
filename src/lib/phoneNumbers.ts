@@ -18,7 +18,15 @@ export function normalizeStoredPhone(raw: string | null | undefined): string | n
   const digits = raw.replace(/\D/g, "");
   if (!digits) return null;
   // Strip +91/91 or trunk 0 only when the remainder is a 10-digit mobile,
-  // so STD codes (e.g. Delhi 011…) are never mangled.
+  // so STD codes (e.g. Delhi 011…) are never mangled. Double-prefixed cells
+  // (91 plus trunk 0, e.g. 910…) strip both layers under the same guarantee.
+  if (digits.length === 13 && digits.startsWith("91")) {
+    const afterCountry = digits.slice(2);
+    if (afterCountry.startsWith("0") && isMobileTail(afterCountry.slice(1))) {
+      return afterCountry.slice(1);
+    }
+    return digits;
+  }
   if (digits.length === 12 && digits.startsWith("91") && isMobileTail(digits.slice(2))) {
     return digits.slice(2);
   }

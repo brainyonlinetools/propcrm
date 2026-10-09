@@ -23,6 +23,17 @@ describe("normalizeStoredPhone", () => {
     expect(normalizeStoredPhone("+1 415 555 1234")).toBe("14155551234");
   });
 
+  it("strips double prefixes (91 plus trunk 0)", () => {
+    expect(normalizeStoredPhone("9109873301862")).toBe("9873301862");
+    expect(normalizeStoredPhone("+91 07988317774")).toBe("7988317774");
+  });
+
+  it("keeps ambiguous 11-digit 1-prefixed numbers whole", () => {
+    expect(normalizeStoredPhone("16204062454")).toBe("16204062454");
+    expect(normalizeStoredPhone("+12066171429")).toBe("12066171429");
+    expect(normalizeStoredPhone("9112345678901")).toBe("9112345678901");
+  });
+
   it("returns null for empty values", () => {
     expect(normalizeStoredPhone("")).toBeNull();
     expect(normalizeStoredPhone(null)).toBeNull();

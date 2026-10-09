@@ -113,8 +113,9 @@ export function UnitDetailPanel({
 
   async function handleDelete() {
     try {
-      await deleteInventory.mutateAsync(id);
-      toast.success("Unit deleted");
+      const result = await deleteInventory.mutateAsync(id);
+      toast.success(result.sheetCleared ? "Unit deleted from app and sheet" : "Unit deleted");
+      if (result.warning) toast.warning(result.warning);
       if (onDeleted) {
         onDeleted();
       } else {
@@ -195,6 +196,8 @@ export function UnitDetailPanel({
               <AlertDialogTitle>Delete unit?</AlertDialogTitle>
               <AlertDialogDescription>
                 Are you sure you want to delete {unit.unit_number}? This action cannot be undone.
+                {unit.custom_data?.imported_from_sheet === true &&
+                  " Its row will also be removed from the connected sheet."}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>

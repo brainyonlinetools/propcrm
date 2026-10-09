@@ -63,6 +63,17 @@ export function parseSheetDate(raw: string | undefined): string | null {
     return null;
   }
 
+  // Short-year day-first dates: 24/11/24. POSIX pivot: 00-68 → 2000s, 69-99 → 1900s.
+  const dmyShort = t.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2})(?!\d)/);
+  if (dmyShort) {
+    const [, d, m, yy] = dmyShort;
+    const year = Number(yy) <= 68 ? 2000 + Number(yy) : 1900 + Number(yy);
+    if (Number(m) >= 1 && Number(m) <= 12 && Number(d) >= 1 && Number(d) <= 31) {
+      return `${year}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+    }
+    return null;
+  }
+
   const date = new Date(t);
   if (Number.isNaN(date.getTime())) return null;
   return format(date, "yyyy-MM-dd");
@@ -111,9 +122,10 @@ export function mapConnectedLeadRow(
   options: { sheetRow: number; sheetId: string; sheetTab: string; stages: PipelineStage[] }
 ): MapConnectedLeadResult {
   const warnings: string[] = [];
-  const name = getField(row, "Name");
-  if (!name) {
-    return { lead: null, note: null, warnings, error: "Name is required" };
+  const nameField = getField(row, "Name");
+  const name = nameField || `Lead ${options.sheetRow}`;
+  if (!nameField) {
+    warnings.push(`Missing name, used "${name}"`);
   }
 
   const sorted = [...options.stages].sort((a, b) => a.sort_order - b.sort_order);
@@ -145,6 +157,12 @@ export function mapConnectedLeadRow(
     warnings.push(`Could not parse last call date "${lastCallRaw}"`);
   }
 
+  const dateRaw = getField(row, "Date");
+  const acquiredDate = parseSheetDate(dateRaw);
+  if (dateRaw && !acquiredDate) {
+    warnings.push(`Could not parse date "${dateRaw}"`);
+  }
+
   const assigned = assignSplitPhones(getField(row, "Phone"));
   for (const fragment of assigned.dropped) {
     warnings.push(`Dropped "${fragment}" (not a phone number)`);
@@ -167,7 +185,7 @@ export function mapConnectedLeadRow(
       source: getField(row, "Source") || null,
       stage_id: stageId,
       project_interest: getField(row, "Project Interest") || null,
-      acquired_date: parseSheetDate(getField(row, "Date")),
+      acquired_date: acquiredDate,
       custom_data: customData,
     },
     note: getField(row, "Notes") || null,
@@ -243,6 +261,12 @@ export function mapConnectedInventoryRow(
     warnings.push(`Dropped "${fragment}" (not a phone number)`);
   }
 
+  const dateRaw = getField(row, "Date");
+  const acquiredDate = parseSheetDate(dateRaw);
+  if (dateRaw && !acquiredDate) {
+    warnings.push(`Could not parse date "${dateRaw}"`);
+  }
+
   return {
     unit: {
       unit_number: unitNumber,
@@ -251,7 +275,7 @@ export function mapConnectedInventoryRow(
       area_sqft: area.value,
       price: price.value,
       status,
-      acquired_date: parseSheetDate(getField(row, "Date")),
+      acquired_date: acquiredDate,
       custom_data: customData,
     },
     note: mergeRemarksPhones(getField(row, "Remarks"), ownerPhones.numbers.slice(1)),

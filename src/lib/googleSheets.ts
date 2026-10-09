@@ -1,4 +1,5 @@
 import { google } from "googleapis";
+import { normalizePhoneKey } from "@/lib/utils";
 
 export interface LeadStatusUpdate {
   row: number;
@@ -135,6 +136,94 @@ export async function updateLeadStatusColumn(
 export interface SheetLeadRow {
   sheetRow: number;
   row: Record<string, string>;
+}
+
+export interface SheetIdentityCheck {
+  /** Header cell to look up (case-insensitive). */
+  header: string;
+  expected: string;
+  /** "phone" compares digit keys; "text" compares trimmed case-insensitive. */
+  kind: "phone" | "text";
+}
+
+/** Verify a sheet row still belongs to the record before clearing it. */
+export function sheetRowMatchesIdentity(
+  headers: (string | null | undefined)[],
+  values: (string | null | undefined)[],
+  checks: SheetIdentityCheck[]
+): boolean {
+  if (checks.length === 0) return true;
+  const indexByHeader = new Map<string, number>();
+  headers.forEach((header, index) => {
+    const key = String(header ?? "").trim().toLowerCase();
+    if (key && !indexByHeader.has(key)) indexByHeader.set(key, index);
+  });
+  return checks.every(({ header, expected, kind }) => {
+    const index = indexByHeader.get(header.trim().toLowerCase());
+    if (index === undefined) return false;
+    const cell = String(values[index] ?? "").trim();
+    if (!cell) return false;
+    if (kind === "phone") {
+      const actual = normalizePhoneKey(cell);
+      const wanted = normalizePhoneKey(expected);
+      return !!actual && actual === wanted;
+    }
+    return cell.toLowerCase() === expected.trim().toLowerCase();
+  });
+}
+
+export interface ClearTrackedRowResult {
+  cleared: boolean;
+  mismatched: boolean;
+}
+
+/**
+ * Clear a tracked row's cells after verifying it still matches the record.
+ * Clears values (keeps the row in place) so every other tracked row number
+ * stays valid. Already-empty rows report cleared (idempotent).
+ */
+export async function clearTrackedSheetRow(
+  tab: string,
+  sheetRow: number,
+  checks: SheetIdentityCheck[]
+): Promise<ClearTrackedRowResult> {
+  const sheetId = process.env.GOOGLE_SHEET_ID;
+  if (!sheetId) {
+    throw new Error("Missing GOOGLE_SHEET_ID");
+  }
+  if (!Number.isInteger(sheetRow) || sheetRow < 2) {
+    return { cleared: false, mismatched: true };
+  }
+
+  const sheets = getSheetsClient();
+  let fetched;
+  try {
+    fetched = await sheets.spreadsheets.values.batchGet({
+      spreadsheetId: sheetId,
+      ranges: [`${tab}!1:1`, `${tab}!${sheetRow}:${sheetRow}`],
+    });
+  } catch (err) {
+    throw new Error(describeSheetsError(err, { tab }));
+  }
+  const valueRanges = fetched.data.valueRanges ?? [];
+  const headers = valueRanges[0]?.values?.[0] ?? [];
+  const values = valueRanges[1]?.values?.[0] ?? [];
+  if (values.length === 0 || values.every((v) => String(v ?? "").trim() === "")) {
+    return { cleared: true, mismatched: false };
+  }
+  if (!sheetRowMatchesIdentity(headers, values, checks)) {
+    return { cleared: false, mismatched: true };
+  }
+
+  try {
+    await sheets.spreadsheets.values.clear({
+      spreadsheetId: sheetId,
+      range: `${tab}!A${sheetRow}:ZZ${sheetRow}`,
+    });
+  } catch (err) {
+    throw new Error(describeSheetsError(err, { tab }));
+  }
+  return { cleared: true, mismatched: false };
 }
 
 /** Generic tab reader keyed by the tab's own header row. Skips fully-empty rows. */
