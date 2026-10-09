@@ -25,6 +25,39 @@ export function getSheetsClient() {
   return google.sheets({ version: "v4", auth });
 }
 
+export interface SheetsErrorContext {
+  tab: string;
+}
+
+/**
+ * Translate raw Google Sheets API failures into actionable sync errors.
+ * Google returns a bare 404 ("Requested entity was not found.") both when
+ * the spreadsheet ID is wrong and when the sheet isn't shared with the
+ * service account, so spell out both checks.
+ */
+export function describeSheetsError(err: unknown, context: SheetsErrorContext): string {
+  const holder = err as { code?: unknown; status?: unknown };
+  const codes = [holder?.code, holder?.status]
+    .map(Number)
+    .filter((n) => Number.isFinite(n));
+  const message = err instanceof Error ? err.message : String(err);
+  if (codes.includes(404) || /requested entity was not found/i.test(message)) {
+    return (
+      `Cannot open the connected spreadsheet (tab "${context.tab}"): ` +
+      `spreadsheet not found or not shared with the service account. ` +
+      `Check that GOOGLE_SHEET_ID is the bare spreadsheet ID and the sheet ` +
+      `is shared with the service account as Editor.`
+    );
+  }
+  if (/unable to parse range/i.test(message)) {
+    return (
+      `Tab "${context.tab}" was not found in the connected spreadsheet. ` +
+      `Check GOOGLE_SHEET_LEADS_TAB and GOOGLE_SHEET_INVENTORY_TAB.`
+    );
+  }
+  return message;
+}
+
 function columnIndexToLetter(index: number): string {
   let letter = "";
   let n = index;
@@ -41,10 +74,15 @@ export async function getColumnIndexByHeader(
   headerName: string
 ): Promise<number> {
   const sheets = getSheetsClient();
-  const response = await sheets.spreadsheets.values.get({
-    spreadsheetId: sheetId,
-    range: `${sheetName}!1:1`,
-  });
+  let response;
+  try {
+    response = await sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId,
+      range: `${sheetName}!1:1`,
+    });
+  } catch (err) {
+    throw new Error(describeSheetsError(err, { tab: sheetName }));
+  }
 
   const headers = response.data.values?.[0] ?? [];
   const index = headers.findIndex(
@@ -81,13 +119,17 @@ export async function updateLeadStatusColumn(
     values: [[status]],
   }));
 
-  await sheets.spreadsheets.values.batchUpdate({
-    spreadsheetId: sheetId,
-    requestBody: {
-      valueInputOption: "RAW",
-      data,
-    },
-  });
+  try {
+    await sheets.spreadsheets.values.batchUpdate({
+      spreadsheetId: sheetId,
+      requestBody: {
+        valueInputOption: "RAW",
+        data,
+      },
+    });
+  } catch (err) {
+    throw new Error(describeSheetsError(err, { tab: sheetName }));
+  }
 }
 
 export interface SheetLeadRow {
@@ -103,10 +145,15 @@ export async function readSheetTab(tabName: string): Promise<SheetLeadRow[]> {
   }
 
   const sheets = getSheetsClient();
-  const response = await sheets.spreadsheets.values.get({
-    spreadsheetId: sheetId,
-    range: `${tabName}!A:ZZ`,
-  });
+  let response;
+  try {
+    response = await sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId,
+      range: `${tabName}!A:ZZ`,
+    });
+  } catch (err) {
+    throw new Error(describeSheetsError(err, { tab: tabName }));
+  }
 
   const values = response.data.values ?? [];
   if (values.length < 2) return [];
