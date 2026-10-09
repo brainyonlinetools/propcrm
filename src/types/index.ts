@@ -119,11 +119,13 @@ export interface Inventory {
   area_sqft: number | null;
   price: number | null;
   status: InventoryStatus;
+  seller_id: string | null;
   acquired_date: string | null;
   custom_data: Record<string, unknown>;
   created_at: string;
   updated_at: string;
   projects?: Project | null;
+  sellers?: Pick<Seller, "id" | "owner_name" | "contact_phone" | "alt_phone"> | null;
   inventory_media?: InventoryMedia[];
 }
 
@@ -188,9 +190,77 @@ export interface InventoryInsert {
   area_sqft?: number | null;
   price?: number | null;
   status?: InventoryStatus;
+  seller_id?: string | null;
   acquired_date?: string | null;
   custom_data?: Record<string, unknown>;
 }
+
+export interface Seller {
+  id: string;
+  owner_name: string;
+  contact_phone: string | null;
+  alt_phone: string | null;
+  email: string | null;
+  project_id: string | null;
+  tower: string | null;
+  unit_number: string | null;
+  floor: number | null;
+  configuration: string | null;
+  area_sqft: number | null;
+  facing: string | null;
+  parking: number | null;
+  asking_price: number | null;
+  available_for_sale: boolean;
+  remarks: string | null;
+  follow_up_date: string | null;
+  last_call_outcome: string | null;
+  last_called_at: string | null;
+  created_at: string;
+  updated_at: string;
+  projects?: Project | null;
+}
+
+export interface SellerInsert {
+  owner_name: string;
+  contact_phone?: string | null;
+  alt_phone?: string | null;
+  email?: string | null;
+  project_id?: string | null;
+  tower?: string | null;
+  unit_number?: string | null;
+  floor?: number | null;
+  configuration?: string | null;
+  area_sqft?: number | null;
+  facing?: string | null;
+  parking?: number | null;
+  asking_price?: number | null;
+  available_for_sale?: boolean;
+  remarks?: string | null;
+  follow_up_date?: string | null;
+}
+
+export interface SellerNote {
+  id: string;
+  seller_id: string;
+  content: string;
+  note_type: NoteType;
+  created_at: string;
+}
+
+export type CallOutcome =
+  | "connected"
+  | "no_answer"
+  | "callback"
+  | "wrong_number"
+  | "not_interested";
+
+export const CALL_OUTCOME_LABELS: Record<CallOutcome, string> = {
+  connected: "Connected",
+  no_answer: "No answer",
+  callback: "Call back later",
+  wrong_number: "Wrong number",
+  not_interested: "Not interested",
+};
 
 export interface InventoryMediaInsert {
   inventory_id: string;

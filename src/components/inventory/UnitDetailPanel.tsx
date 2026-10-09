@@ -365,6 +365,36 @@ export function UnitDetailPanel({
         </section>
       )}
 
+      {unit.sellers && (
+        <section className="rounded-lg border border-border bg-card p-4 shadow-card">
+          <h2 className="mb-3 text-sm font-semibold">Linked Seller</h2>
+          <Link
+            href={`/sellers/${unit.sellers.id}`}
+            className="flex items-center justify-between gap-3 rounded-md border border-border p-3 hover:bg-muted/50"
+          >
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-medium">
+                {unit.sellers.owner_name}
+              </span>
+              <span className="block truncate text-xs text-muted-foreground">
+                Synced from seller data
+              </span>
+            </span>
+            {unit.sellers.contact_phone && (
+              <Button asChild variant="outline" size="sm" className="shrink-0">
+                <a
+                  href={`tel:${phoneToTel(unit.sellers.contact_phone)}`}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Phone data-icon="inline-start" />
+                  Call
+                </a>
+              </Button>
+            )}
+          </Link>
+        </section>
+      )}
+
       <section className="rounded-lg border border-border bg-card p-4 shadow-card">
         <h2 className="mb-3 text-sm font-semibold">Custom Fields</h2>
         <DynamicFieldRenderer

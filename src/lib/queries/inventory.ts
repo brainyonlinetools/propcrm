@@ -64,6 +64,7 @@ export function useInventory() {
           `
           *,
           projects(id, name, location),
+          sellers(id, owner_name, contact_phone, alt_phone),
           inventory_media(*)
         `
         )
@@ -87,7 +88,8 @@ export function useInventoryItem(id: string) {
         .select(
           `
           *,
-          projects(id, name, location)
+          projects(id, name, location),
+          sellers(id, owner_name, contact_phone, alt_phone)
         `
         )
         .eq("id", id)
@@ -132,7 +134,8 @@ export function useInventoryByIds(ids: string[]) {
         .select(
           `
           *,
-          projects(id, name, location)
+          projects(id, name, location),
+          sellers(id, owner_name, contact_phone, alt_phone)
         `
         )
         .in("id", ids)

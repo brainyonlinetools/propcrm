@@ -2,17 +2,17 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Building2, CalendarDays, CheckSquare, FolderKanban, Settings, Users } from "lucide-react";
+import { FolderKanban, Handshake, Ellipsis, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const tabs = [
+  { href: "/sellers", label: "Sellers", icon: Handshake },
   { href: "/leads", label: "Leads", icon: Users },
-  { href: "/inventory", label: "Inventory", icon: Building2 },
   { href: "/projects", label: "Projects", icon: FolderKanban },
-  { href: "/calendar", label: "Calendar", icon: CalendarDays },
-  { href: "/tasks", label: "Tasks", icon: CheckSquare },
-  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/more", label: "More", icon: Ellipsis },
 ] as const;
+
+const MORE_ROUTES = ["/more", "/tasks", "/calendar", "/settings"];
 
 export function BottomNav() {
   const pathname = usePathname();
@@ -36,7 +36,10 @@ export function BottomNav() {
         )}
       >
         {tabs.map(({ href, label, icon: Icon }) => {
-          const isActive = pathname === href || pathname.startsWith(`${href}/`);
+          const isActive =
+            href === "/more"
+              ? MORE_ROUTES.some((r) => pathname === r || pathname.startsWith(`${r}/`))
+              : pathname === href || pathname.startsWith(`${href}/`);
           return (
             <Link
               key={href}

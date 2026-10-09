@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { CheckSquare, LayoutGrid, List, Plus, Search, Upload, X, ChevronDown } from "lucide-react";
+import { toast } from "sonner";
+import { CheckSquare, LayoutGrid, List, PhoneCall, Plus, Search, Upload, X, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -22,24 +23,26 @@ import {
 import { StageBadge } from "@/components/shared/StatusBadge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PullToRefresh } from "@/components/shared/PullToRefresh";
+import { CallQueueSheet, type CallQueueContact } from "@/components/shared/CallQueueSheet";
 import { useIsDesktop } from "@/hooks/useIsDesktop";
-import { leadsKey, qualifiedLeadsKey, useLeads, useQualifiedLeads } from "@/lib/queries/leads";
+import { leadsKey, useLeads } from "@/lib/queries/leads";
 import { usePipelineStages } from "@/lib/queries/pipelineStages";
+import { useCreateLeadNote, useCreateTask } from "@/lib/queries/tasks";
 import { cn, formatDisplayDate, formatPhone, formatRelativeDate } from "@/lib/utils";
 import {
+  CALL_OUTCOME_LABELS,
   DISQUALIFIED_STAGE_LABEL,
-  QUALIFIED_STAGE_LABEL,
   isArchivedLead,
-  isQualifiedLead,
+  type CallOutcome,
 } from "@/types";
 
 type ViewMode = "list" | "kanban";
 type LeadViewFilter = "active" | "archived";
-type LeadTab = "all" | "qualified";
+type LeadTab = "raw" | "pipeline";
 
 export default function LeadsPage() {
   const isDesktop = useIsDesktop();
-  const [leadTab, setLeadTab] = useState<LeadTab>("all");
+  const [leadTab, setLeadTab] = useState<LeadTab>("raw");
   const [view, setView] = useState<ViewMode>("list");
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState<string | null>(null);
@@ -54,19 +57,39 @@ export default function LeadsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [batchOpen, setBatchOpen] = useState(false);
   const [stageChangeOpen, setStageChangeOpen] = useState(false);
+  const [callQueueOpen, setCallQueueOpen] = useState(false);
+  const [callQueue, setCallQueue] = useState<CallQueueContact[]>([]);
   const queryClient = useQueryClient();
+  const createLeadNote = useCreateLeadNote();
+  const createTask = useCreateTask();
 
   const { data: leads = [], isLoading, isError } = useLeads();
-  const {
-    data: qualifiedLeads = [],
-    isLoading: isQualifiedLoading,
-    isError: isQualifiedError,
-  } = useQualifiedLeads();
   const { data: stages = [] } = usePipelineStages();
 
-  const sourceLeads = leadTab === "qualified" ? qualifiedLeads : leads;
-  const listLoading = leadTab === "qualified" ? isQualifiedLoading : isLoading;
-  const listError = leadTab === "qualified" ? isQualifiedError : isError;
+  const sortedStages = useMemo(
+    () => [...stages].sort((a, b) => a.sort_order - b.sort_order),
+    [stages]
+  );
+  const rawStageId = sortedStages[0]?.id ?? null;
+
+  const rawLeads = useMemo(
+    () => leads.filter((lead) => lead.stage_id === rawStageId || lead.stage_id == null),
+    [leads, rawStageId]
+  );
+
+  const pipelineLeads = useMemo(
+    () =>
+      leads.filter((lead) => {
+        if (lead.stage_id == null || lead.stage_id === rawStageId) return false;
+        const archived = isArchivedLead(lead);
+        if (viewFilter === "active" && archived) return false;
+        if (viewFilter === "archived" && !archived) return false;
+        return true;
+      }),
+    [leads, rawStageId, viewFilter]
+  );
+
+  const sourceLeads = leadTab === "raw" ? rawLeads : pipelineLeads;
 
   const sources = useMemo(
     () => [...new Set(sourceLeads.map((l) => l.source).filter(Boolean))] as string[],
@@ -80,23 +103,13 @@ export default function LeadsPage() {
   );
 
   const visibleStages = useMemo(() => {
-    if (leadTab === "qualified") return [];
-    return viewFilter === "archived"
-      ? stages
-      : stages.filter(
-          (s) => s.label !== DISQUALIFIED_STAGE_LABEL && s.label !== QUALIFIED_STAGE_LABEL
-        );
-  }, [stages, viewFilter, leadTab]);
+    const rest = sortedStages.filter((s) => s.id !== rawStageId);
+    if (viewFilter === "archived") return rest;
+    return rest.filter((s) => s.label !== DISQUALIFIED_STAGE_LABEL);
+  }, [sortedStages, rawStageId, viewFilter]);
 
   const filtered = useMemo(() => {
     return sourceLeads.filter((lead) => {
-      if (leadTab === "all") {
-        const archived = isArchivedLead(lead);
-        if (viewFilter === "active" && archived) return false;
-        if (viewFilter === "archived" && !archived) return false;
-        if (viewFilter === "active" && isQualifiedLead(lead)) return false;
-      }
-
       const q = search.toLowerCase();
       const matchesSearch =
         !q ||
@@ -109,17 +122,9 @@ export default function LeadsPage() {
         !projectFilter || lead.project_interest === projectFilter;
       return matchesSearch && matchesStage && matchesSource && matchesProject;
     });
-  }, [
-    sourceLeads,
-    search,
-    stageFilter,
-    sourceFilter,
-    projectFilter,
-    viewFilter,
-    leadTab,
-  ]);
+  }, [sourceLeads, search, stageFilter, sourceFilter, projectFilter]);
 
-  const listView = view === "list" || leadTab === "qualified";
+  const listView = view === "list" || leadTab === "raw";
   const splitMode = isDesktop && listView && !selectionMode;
 
   useEffect(() => {
@@ -129,8 +134,8 @@ export default function LeadsPage() {
   }, [splitMode, filtered, selectedId]);
 
   const activeFilterCount = [
-    viewFilter !== "active" ? viewFilter : null,
-    stageFilter,
+    leadTab === "pipeline" && viewFilter !== "active" ? viewFilter : null,
+    leadTab === "pipeline" ? stageFilter : null,
     sourceFilter,
     projectFilter,
   ].filter(Boolean).length;
@@ -145,22 +150,17 @@ export default function LeadsPage() {
   }
 
   async function handleRefresh() {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: leadsKey }),
-      queryClient.invalidateQueries({ queryKey: qualifiedLeadsKey }),
-    ]);
+    await queryClient.invalidateQueries({ queryKey: leadsKey });
   }
 
   function handleLeadTabChange(value: string) {
     const nextTab = value as LeadTab;
     setLeadTab(nextTab);
-    if (nextTab === "qualified") {
-      setView("list");
-      setViewFilter("active");
-      setStageFilter(null);
-      setSelectionMode(false);
-      setSelectedIds(new Set());
-    }
+    setView("list");
+    setViewFilter("active");
+    setStageFilter(null);
+    setSelectionMode(false);
+    setSelectedIds(new Set());
   }
 
   function toggleSelectionMode() {
@@ -198,6 +198,55 @@ export default function LeadsPage() {
     setSelectedIds(new Set());
   }
 
+  function startCalling() {
+    const source =
+      selectionMode && selectedLeads.length > 0 ? selectedLeads : filtered;
+    const contacts: CallQueueContact[] = source
+      .filter((lead) => lead.phone)
+      .map((lead) => ({
+        id: lead.id,
+        name: lead.name,
+        phone: lead.phone as string,
+        subtitle:
+          [lead.pipeline_stages?.label, lead.project_interest]
+            .filter(Boolean)
+            .join(" · ") || null,
+      }));
+    if (contacts.length === 0) {
+      toast.error("No contacts with phone numbers in this list");
+      return;
+    }
+    setCallQueue(contacts);
+    setCallQueueOpen(true);
+  }
+
+  async function handleCallOutcome(
+    contact: CallQueueContact,
+    outcome: CallOutcome,
+    opts?: { note?: string; followUpDate?: string }
+  ) {
+    const label = CALL_OUTCOME_LABELS[outcome];
+    try {
+      await createLeadNote.mutateAsync({
+        lead_id: contact.id,
+        content: opts?.note ? `Call (${label}): ${opts.note}` : `Call: ${label}`,
+        note_type: "call",
+      });
+      if (outcome === "callback" && opts?.followUpDate) {
+        await createTask.mutateAsync({
+          lead_id: contact.id,
+          title: `Call back ${contact.name}`,
+          due_date: opts.followUpDate,
+          due_time: null,
+        });
+      }
+      toast.success(`${contact.name} — ${label}`);
+    } catch {
+      toast.error(`Failed to log call for ${contact.name}`);
+      throw new Error("call-log-failed");
+    }
+  }
+
   const listHeader = (
     <header className="sticky top-0 z-40 shrink-0 border-b border-border bg-background/95 px-4 py-3 backdrop-blur-sm">
       <div className="flex items-center justify-between gap-2">
@@ -207,7 +256,6 @@ export default function LeadsPage() {
             variant={selectionMode ? "secondary" : "ghost"}
             size="icon"
             onClick={toggleSelectionMode}
-            disabled={leadTab === "qualified"}
             aria-label={selectionMode ? "Exit selection mode" : "Select leads for bulk actions"}
           >
             <CheckSquare />
@@ -221,7 +269,15 @@ export default function LeadsPage() {
             <Upload />
           </Button>
           <Button
-            variant={view === "list" ? "secondary" : "ghost"}
+            variant="ghost"
+            size="icon"
+            onClick={startCalling}
+            aria-label="Start calling"
+          >
+            <PhoneCall />
+          </Button>
+          <Button
+            variant={listView ? "secondary" : "ghost"}
             size="icon"
             onClick={() => setView("list")}
             aria-label="List view"
@@ -229,10 +285,10 @@ export default function LeadsPage() {
             <List />
           </Button>
           <Button
-            variant={view === "kanban" ? "secondary" : "ghost"}
+            variant={view === "kanban" && leadTab === "pipeline" ? "secondary" : "ghost"}
             size="icon"
             onClick={() => setView("kanban")}
-            disabled={leadTab === "qualified"}
+            disabled={leadTab === "raw"}
             aria-label="Kanban view"
           >
             <LayoutGrid />
@@ -242,12 +298,19 @@ export default function LeadsPage() {
 
       <Tabs value={leadTab} onValueChange={handleLeadTabChange} className="mt-3">
         <TabsList className="grid h-10 w-full grid-cols-2">
-          <TabsTrigger value="all">All</TabsTrigger>
-          <TabsTrigger value="qualified">
-            Qualified
-            {qualifiedLeads.length > 0 && (
+          <TabsTrigger value="raw">
+            Raw Leads
+            {rawLeads.length > 0 && (
               <span className="ml-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
-                {qualifiedLeads.length}
+                {rawLeads.length}
+              </span>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="pipeline">
+            Pipeline
+            {pipelineLeads.length > 0 && (
+              <span className="ml-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                {pipelineLeads.length}
               </span>
             )}
           </TabsTrigger>
@@ -302,7 +365,7 @@ export default function LeadsPage() {
               </div>
             )}
 
-            {leadTab === "all" && (
+            {leadTab === "pipeline" && (
               <CollapsibleFilterSection
                 title="View"
                 summary={viewFilter === "archived" ? "Archived" : "Active"}
@@ -321,7 +384,7 @@ export default function LeadsPage() {
               </CollapsibleFilterSection>
             )}
 
-            {leadTab === "all" && (
+            {leadTab === "pipeline" && (
               <CollapsibleFilterSection
                 title="Stage"
                 summary={activeStageLabel ?? "All stages"}
@@ -395,13 +458,13 @@ export default function LeadsPage() {
       onRefresh={handleRefresh}
       className={cn("flex-1", splitMode ? "overflow-y-auto" : "px-4 py-4")}
     >
-      {listLoading ? (
+      {isLoading ? (
         <div className={cn("flex flex-col gap-3", splitMode ? "p-3" : "")}>
           {Array.from({ length: 4 }).map((_, i) => (
             <Skeleton key={i} className={cn("w-full rounded-lg", splitMode ? "h-16" : "h-28")} />
           ))}
         </div>
-      ) : listError ? (
+      ) : isError ? (
         <div className={splitMode ? "p-4" : undefined}>
           <EmptyState
             title="Could not load leads"
@@ -414,26 +477,30 @@ export default function LeadsPage() {
         <div className={splitMode ? "p-4" : undefined}>
           <EmptyState
             title={
-              leadTab === "qualified"
-                ? "No qualified leads"
+              leadTab === "raw"
+                ? sourceLeads.length === 0
+                  ? "No raw leads"
+                  : "No matching leads"
                 : sourceLeads.length === 0
-                  ? "No leads yet"
-                  : viewFilter === "archived"
+                  ? viewFilter === "archived"
                     ? "No archived leads"
-                    : "No matching leads"
+                    : "No leads in pipeline"
+                  : "No matching leads"
             }
             description={
-              leadTab === "qualified"
-                ? "Leads marked as Qualified appear here, sorted by recent activity."
+              leadTab === "raw"
+                ? sourceLeads.length === 0
+                  ? "New enquiries land here. Qualify them to move them into the pipeline."
+                  : "Try adjusting your search or filters."
                 : sourceLeads.length === 0
-                  ? "Add your first enquiry from Golf Course Road, DLF, or Sector 62 walk-ins."
-                  : viewFilter === "archived"
+                  ? viewFilter === "archived"
                     ? "Leads marked as Disqualified appear here."
-                    : "Try adjusting your search or filters."
+                    : "Move raw leads into a pipeline stage to start working them."
+                  : "Try adjusting your search or filters."
             }
-            actionLabel={sourceLeads.length === 0 && leadTab === "all" ? "Add Lead" : undefined}
+            actionLabel={sourceLeads.length === 0 && leadTab === "raw" ? "Add Lead" : undefined}
             onAction={
-              sourceLeads.length === 0 && leadTab === "all" ? () => setFormOpen(true) : undefined
+              sourceLeads.length === 0 && leadTab === "raw" ? () => setFormOpen(true) : undefined
             }
           />
         </div>
@@ -450,7 +517,7 @@ export default function LeadsPage() {
                     : (lead.project_interest ?? lead.source ?? undefined)
                 }
                 meta={
-                  leadTab === "qualified"
+                  leadTab === "pipeline"
                     ? formatRelativeDate(lead.updated_at)
                     : formatDisplayDate(lead.acquired_date ?? lead.created_at)
                 }
@@ -476,7 +543,7 @@ export default function LeadsPage() {
                 selectionMode={selectionMode}
                 selected={selectedIds.has(lead.id)}
                 onToggleSelect={toggleLeadSelection}
-                showLastActivity={leadTab === "qualified"}
+                showLastActivity={leadTab === "pipeline"}
               />
             ))}
           </div>
@@ -563,6 +630,13 @@ export default function LeadsPage() {
         open={batchOpen}
         onOpenChange={setBatchOpen}
         onComplete={handleBatchComplete}
+      />
+      <CallQueueSheet
+        open={callQueueOpen}
+        onOpenChange={setCallQueueOpen}
+        title={leadTab === "raw" ? "Calling raw leads" : "Calling pipeline leads"}
+        contacts={callQueue}
+        onLogOutcome={handleCallOutcome}
       />
     </>
   );

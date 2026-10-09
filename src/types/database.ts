@@ -198,6 +198,7 @@ export interface Database {
           area_sqft: number | null;
           price: number | null;
           status: string;
+          seller_id: string | null;
           acquired_date: string | null;
           custom_data: Json;
           created_at: string;
@@ -211,6 +212,7 @@ export interface Database {
           area_sqft?: number | null;
           price?: number | null;
           status?: string;
+          seller_id?: string | null;
           acquired_date?: string | null;
           custom_data?: Json;
           created_at?: string;
@@ -224,6 +226,7 @@ export interface Database {
           area_sqft?: number | null;
           price?: number | null;
           status?: string;
+          seller_id?: string | null;
           acquired_date?: string | null;
           custom_data?: Json;
           created_at?: string;
@@ -371,6 +374,102 @@ export interface Database {
           endpoint?: string;
           p256dh?: string;
           auth?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      sellers: {
+        Row: {
+          id: string;
+          owner_name: string;
+          contact_phone: string | null;
+          alt_phone: string | null;
+          email: string | null;
+          project_id: string | null;
+          tower: string | null;
+          unit_number: string | null;
+          floor: number | null;
+          configuration: string | null;
+          area_sqft: number | null;
+          facing: string | null;
+          parking: number | null;
+          asking_price: number | null;
+          available_for_sale: boolean;
+          remarks: string | null;
+          follow_up_date: string | null;
+          last_call_outcome: string | null;
+          last_called_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          owner_name: string;
+          contact_phone?: string | null;
+          alt_phone?: string | null;
+          email?: string | null;
+          project_id?: string | null;
+          tower?: string | null;
+          unit_number?: string | null;
+          floor?: number | null;
+          configuration?: string | null;
+          area_sqft?: number | null;
+          facing?: string | null;
+          parking?: number | null;
+          asking_price?: number | null;
+          available_for_sale?: boolean;
+          remarks?: string | null;
+          follow_up_date?: string | null;
+          last_call_outcome?: string | null;
+          last_called_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          owner_name?: string;
+          contact_phone?: string | null;
+          alt_phone?: string | null;
+          email?: string | null;
+          project_id?: string | null;
+          tower?: string | null;
+          unit_number?: string | null;
+          floor?: number | null;
+          configuration?: string | null;
+          area_sqft?: number | null;
+          facing?: string | null;
+          parking?: number | null;
+          asking_price?: number | null;
+          available_for_sale?: boolean;
+          remarks?: string | null;
+          follow_up_date?: string | null;
+          last_call_outcome?: string | null;
+          last_called_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      seller_notes: {
+        Row: {
+          id: string;
+          seller_id: string;
+          content: string;
+          note_type: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          seller_id: string;
+          content: string;
+          note_type?: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          seller_id?: string;
+          content?: string;
+          note_type?: string;
           created_at?: string;
         };
         Relationships: [];

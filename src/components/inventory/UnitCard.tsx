@@ -38,6 +38,7 @@ export function UnitCard({ unit, onSelect, selected = false }: UnitCardProps) {
 
         <div className="flex flex-col gap-0.5 text-xs text-muted-foreground">
           {unit.unit_type && <span>{unit.unit_type}</span>}
+          {unit.sellers && <span>Seller: {unit.sellers.owner_name}</span>}
           {floor != null && <span>Floor {String(floor)}</span>}
           {facing != null && <span>{String(facing)} facing</span>}
           {unit.area_sqft != null && <span>{unit.area_sqft.toLocaleString("en-IN")} sq.ft.</span>}

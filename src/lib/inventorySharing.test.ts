@@ -11,6 +11,7 @@ function makeUnit(overrides: Partial<Inventory> = {}): Inventory {
     area_sqft: 1650,
     price: 2_50_00_000,
     status: "available",
+    seller_id: null,
     acquired_date: null,
     custom_data: {
       project_name: "Anand Prime Residences",
