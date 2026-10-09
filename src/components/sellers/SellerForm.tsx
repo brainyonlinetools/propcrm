@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/sheet";
 import { useCreateSeller, useUpdateSeller } from "@/lib/queries/sellers";
 import { useProjects } from "@/lib/queries/projects";
+import { assignSplitPhones, mergeRemarksPhones } from "@/lib/phoneNumbers";
 import type { Seller, SellerInsert } from "@/types";
 
 const sellerSchema = z.object({
@@ -116,10 +117,11 @@ export function SellerForm({ open, onOpenChange, seller = null }: SellerFormProp
   const isPending = createSeller.isPending || updateSeller.isPending;
 
   async function onSubmit(values: SellerFormValues) {
+    const assigned = assignSplitPhones(values.contact_phone, values.alt_phone);
     const payload: SellerInsert = {
       owner_name: values.owner_name.trim(),
-      contact_phone: toTextOrNull(values.contact_phone),
-      alt_phone: toTextOrNull(values.alt_phone),
+      contact_phone: assigned.primary,
+      alt_phone: assigned.alt,
       email: toTextOrNull(values.email)?.toLowerCase() ?? null,
       project_id:
         !values.project_id || values.project_id === UNASSIGNED ? null : values.project_id,
@@ -132,9 +134,12 @@ export function SellerForm({ open, onOpenChange, seller = null }: SellerFormProp
       parking: toNumberOrNull(values.parking),
       asking_price: toNumberOrNull(values.asking_price),
       available_for_sale: values.available_for_sale,
-      remarks: toTextOrNull(values.remarks),
+      remarks: mergeRemarksPhones(values.remarks, assigned.extras),
       follow_up_date: toTextOrNull(values.follow_up_date),
     };
+    for (const fragment of assigned.dropped) {
+      toast.warning(`Ignored "${fragment}" (not a phone number)`);
+    }
 
     try {
       const result = isEditing
@@ -196,6 +201,9 @@ export function SellerForm({ open, onOpenChange, seller = null }: SellerFormProp
                 placeholder="9876543210"
                 {...register("contact_phone")}
               />
+              <p className="text-xs text-muted-foreground">
+                Separate multiple numbers with commas
+              </p>
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="seller-alt-phone">Alternate phone</Label>

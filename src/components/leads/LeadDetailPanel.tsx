@@ -95,9 +95,19 @@ export function LeadDetailPanel({ id, embedded = false }: LeadDetailPanelProps) 
 
   const linkedUnit = inventory.find((u) => u.id === lead.linked_unit_id);
 
-  async function copyPhone() {
-    if (!lead?.phone) return;
-    await navigator.clipboard.writeText(lead.phone);
+  const additionalPhones: string[] = Array.isArray(lead.custom_data?.additional_phones)
+    ? (lead.custom_data.additional_phones as unknown[]).filter(
+        (p): p is string => typeof p === "string" && Boolean(p)
+      )
+    : [];
+  const contactNumbers: { phone: string; label: string | null }[] = [
+    ...(lead.phone ? [{ phone: lead.phone, label: null as string | null }] : []),
+    ...(lead.alt_phone ? [{ phone: lead.alt_phone, label: "Alt" as string | null }] : []),
+    ...additionalPhones.map((phone, i) => ({ phone, label: `Phone ${i + 3}` })),
+  ];
+
+  async function copyPhone(phone: string) {
+    await navigator.clipboard.writeText(phone);
     toast.success("Phone copied");
   }
 
@@ -170,16 +180,23 @@ export function LeadDetailPanel({ id, embedded = false }: LeadDetailPanelProps) 
       </div>
 
       <section className="flex flex-col gap-3">
-        {lead.phone && (
-          <button
-            type="button"
-            onClick={copyPhone}
-            className="flex items-center gap-2 text-left text-sm text-muted-foreground"
-          >
-            {formatPhone(lead.phone)}
-            <Copy className="size-3.5" />
-          </button>
-        )}
+        {contactNumbers.map(({ phone, label }, index) => (
+          <div key={`${phone}-${index}`} className="flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={() => copyPhone(phone)}
+              className="flex items-center gap-2 text-left text-sm text-muted-foreground"
+            >
+              {label ? `${label} · ` : ""}
+              {formatPhone(phone)}
+              <Copy className="size-3.5" />
+            </button>
+            <div className="flex gap-2">
+              <CallButton phone={phone} leadId={lead.id} className="flex-1" />
+              <WhatsAppButton lead={lead} phone={phone} className="flex-1" />
+            </div>
+          </div>
+        ))}
 
         <div className="flex flex-wrap items-center gap-2">
           {lead.pipeline_stages && (
@@ -200,11 +217,6 @@ export function LeadDetailPanel({ id, embedded = false }: LeadDetailPanelProps) 
               ))}
             </SelectContent>
           </Select>
-        </div>
-
-        <div className="flex gap-2">
-          <CallButton phone={lead.phone} leadId={lead.id} className="flex-1" />
-          <WhatsAppButton lead={lead} className="flex-1" />
         </div>
       </section>
 

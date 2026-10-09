@@ -34,10 +34,12 @@ import {
 import { usePipelineStages } from "@/lib/queries/pipelineStages";
 import { formatPhone, normalizePhoneKey } from "@/lib/utils";
 import { LEAD_SOURCES, type Lead } from "@/types";
+import { assignSplitPhones } from "@/lib/phoneNumbers";
 
 const leadSchema = z.object({
   name: z.string().min(1, "Name is required"),
   phone: z.string().optional(),
+  alt_phone: z.string().optional(),
   email: z
     .string()
     .trim()
@@ -99,6 +101,7 @@ export function LeadForm({ open, onOpenChange, lead }: LeadFormProps) {
     defaultValues: {
       name: "",
       phone: "",
+      alt_phone: "",
       email: "",
       stage_id: null,
       source: null,
@@ -121,6 +124,7 @@ export function LeadForm({ open, onOpenChange, lead }: LeadFormProps) {
       reset({
         name: lead.name,
         phone: lead.phone ?? "",
+        alt_phone: lead.alt_phone ?? "",
         email: lead.email ?? "",
         stage_id: lead.stage_id ?? null,
         source: lead.source ?? null,
@@ -133,6 +137,7 @@ export function LeadForm({ open, onOpenChange, lead }: LeadFormProps) {
       reset({
         name: "",
         phone: "",
+        alt_phone: "",
         email: "",
         stage_id: stages[0]?.id ?? null,
         source: null,
@@ -153,12 +158,17 @@ export function LeadForm({ open, onOpenChange, lead }: LeadFormProps) {
 
   useEffect(() => {
     if (!open) return;
-    const existing = findLeadByPhone(leads, phoneValue, lead?.id);
+    const existing = findLeadByPhone(
+      leads,
+      assignSplitPhones(phoneValue ?? "").primary,
+      lead?.id
+    );
     setDuplicateLead(existing);
   }, [open, phoneValue, leads, lead?.id]);
 
   async function onSubmit(values: LeadFormValues) {
-    const phone = values.phone?.trim() || null;
+    const assigned = assignSplitPhones(values.phone, values.alt_phone);
+    const phone = assigned.primary;
     if (phone && normalizePhoneKey(phone)) {
       const existing = findLeadByPhone(leads, phone, lead?.id);
       if (existing) {
@@ -168,16 +178,24 @@ export function LeadForm({ open, onOpenChange, lead }: LeadFormProps) {
       }
     }
 
+    for (const fragment of assigned.dropped) {
+      toast.warning(`Ignored "${fragment}" (not a phone number)`);
+    }
+
     try {
       const payload = {
         name: values.name.trim(),
         phone,
+        alt_phone: assigned.alt,
         email: values.email?.trim() || null,
         stage_id: values.stage_id || stages[0]?.id || null,
         source: values.source || null,
         project_interest: values.project_interest?.trim() || null,
         acquired_date: values.acquired_date?.trim() || null,
-        custom_data: customData,
+        custom_data: {
+          ...customData,
+          ...(assigned.extras.length > 0 ? { additional_phones: assigned.extras } : {}),
+        },
       };
 
       if (lead) {
@@ -226,6 +244,9 @@ export function LeadForm({ open, onOpenChange, lead }: LeadFormProps) {
           <div className="flex flex-col gap-2">
             <Label htmlFor="phone">Phone</Label>
             <Input id="phone" type="tel" className="h-12" {...register("phone")} />
+            <p className="text-xs text-muted-foreground">
+              Separate multiple numbers with commas
+            </p>
             {duplicateLead && (
               <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100">
                 <AlertCircle className="mt-0.5 size-4 shrink-0" />
@@ -242,6 +263,11 @@ export function LeadForm({ open, onOpenChange, lead }: LeadFormProps) {
                 </p>
               </div>
             )}
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="alt_phone">Alternate phone</Label>
+            <Input id="alt_phone" type="tel" className="h-12" {...register("alt_phone")} />
           </div>
 
           <div className="flex flex-col gap-2">

@@ -8,12 +8,15 @@ import type {
   Project,
 } from "@/types";
 import { LEAD_SOURCES } from "@/types";
+import { assignSplitPhones } from "@/lib/phoneNumbers";
 import { slugify } from "@/lib/utils";
 import { format } from "date-fns";
 
 export interface BulkImportResult<T> {
   valid: T[];
   errors: BulkRowError[];
+  /** Non-blocking issues; rows with warnings still import. */
+  warnings: BulkRowError[];
 }
 
 export interface BulkRowError {
@@ -24,6 +27,10 @@ export interface BulkRowError {
 const LEAD_SYSTEM_KEYS = new Set([
   "name",
   "phone",
+  "alt_phone",
+  "alt",
+  "phone2",
+  "secondary_phone",
   "email",
   "source",
   "stage",
@@ -65,6 +72,7 @@ export function getBulkImportTemplate(
     const headers = [
       "name",
       "phone",
+      "alt_phone",
       "email",
       "source",
       "stage",
@@ -75,6 +83,7 @@ export function getBulkImportTemplate(
     const example: Record<string, string> = {
       name: "Rajesh Malhotra",
       phone: "9876543210",
+      alt_phone: "",
       email: "rajesh@email.com",
       source: "Meta",
       stage: "New",
@@ -123,6 +132,7 @@ export function parseLeadRows(
 ): BulkImportResult<LeadInsert> {
   const valid: LeadInsert[] = [];
   const errors: BulkRowError[] = [];
+  const warnings: BulkRowError[] = [];
   const defaultStageId = stages[0]?.id ?? null;
 
   rows.forEach((row, index) => {
@@ -166,19 +176,31 @@ export function parseLeadRows(
       return;
     }
 
+    const assigned = assignSplitPhones(
+      getValue(row, ["phone"]),
+      getValue(row, ["alt_phone", "alt", "phone2", "secondary_phone"])
+    );
+    for (const fragment of assigned.dropped) {
+      warnings.push({ row: rowNum, message: `Dropped "${fragment}" (not a phone number)` });
+    }
+
     valid.push({
       name,
-      phone: getValue(row, ["phone"]) || null,
+      phone: assigned.primary,
+      alt_phone: assigned.alt,
       email: getValue(row, ["email"]) || null,
       source: source || null,
       stage_id: stage?.id ?? defaultStageId,
       project_interest: projectInterest || null,
       acquired_date: acquiredDateResult.value,
-      custom_data: customResult.data,
+      custom_data: {
+        ...customResult.data,
+        ...(assigned.extras.length > 0 ? { additional_phones: assigned.extras } : {}),
+      },
     });
   });
 
-  return { valid, errors };
+  return { valid, errors, warnings };
 }
 
 export function parseInventoryRows(
@@ -254,7 +276,7 @@ export function parseInventoryRows(
     });
   });
 
-  return { valid, errors };
+  return { valid, errors, warnings: [] };
 }
 
 function getValue(row: Record<string, string>, keys: string[]): string {

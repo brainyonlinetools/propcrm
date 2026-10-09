@@ -149,6 +149,7 @@ export interface Database {
           id: string;
           name: string;
           phone: string | null;
+          alt_phone: string | null;
           email: string | null;
           stage_id: string | null;
           source: string | null;
@@ -163,6 +164,7 @@ export interface Database {
           id?: string;
           name: string;
           phone?: string | null;
+          alt_phone?: string | null;
           email?: string | null;
           stage_id?: string | null;
           source?: string | null;
@@ -177,6 +179,7 @@ export interface Database {
           id?: string;
           name?: string;
           phone?: string | null;
+          alt_phone?: string | null;
           email?: string | null;
           stage_id?: string | null;
           source?: string | null;

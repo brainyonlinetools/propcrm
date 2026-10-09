@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { FolderKanban, Handshake, Ellipsis, Users } from "lucide-react";
+import { CalendarCheck, FolderKanban, Handshake, Ellipsis, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const tabs = [
+  { href: "/today", label: "Today", icon: CalendarCheck },
   { href: "/sellers", label: "Sellers", icon: Handshake },
   { href: "/leads", label: "Leads", icon: Users },
   { href: "/projects", label: "Projects", icon: FolderKanban },

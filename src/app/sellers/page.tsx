@@ -93,15 +93,26 @@ export default function SellersPage() {
   }
 
   function startCalling() {
-    const contacts: CallQueueContact[] = filtered
-      .filter((s) => s.contact_phone || s.alt_phone)
-      .map((s) => ({
-        id: s.id,
-        name: s.owner_name,
-        phone: (s.contact_phone ?? s.alt_phone) as string,
-        subtitle:
-          [s.unit_number, s.projects?.name].filter(Boolean).join(" · ") || null,
-      }));
+    const contacts: CallQueueContact[] = filtered.flatMap((s) => {
+      const base = [s.unit_number, s.projects?.name].filter(Boolean).join(" · ") || null;
+      const numbers: { phone: string; tag: string | null }[] = [];
+      if (s.contact_phone) numbers.push({ phone: s.contact_phone, tag: null });
+      if (s.alt_phone) numbers.push({ phone: s.alt_phone, tag: "Alt" });
+      const seen = new Set<string>();
+      return numbers
+        .filter(({ phone }) => {
+          if (seen.has(phone)) return false;
+          seen.add(phone);
+          return true;
+        })
+        .map(({ phone, tag }, i) => ({
+          id: `${s.id}:${i}`,
+          recordId: s.id,
+          name: s.owner_name,
+          phone,
+          subtitle: [base, tag].filter(Boolean).join(" · ") || null,
+        }));
+    });
     if (contacts.length === 0) {
       toast.error("No seller contacts with phone numbers in this list");
       return;
@@ -118,11 +129,11 @@ export default function SellersPage() {
     const label = CALL_OUTCOME_LABELS[outcome];
     try {
       await logSellerCall.mutateAsync({
-        seller_id: contact.id,
+        seller_id: contact.recordId,
         outcome,
         note: opts?.note
-          ? `Call (${label}): ${opts.note}`
-          : undefined,
+          ? `Call (${label}) ${contact.phone}: ${opts.note}`
+          : `Call (${label}) ${contact.phone}`,
         follow_up_date: opts?.followUpDate ?? null,
       });
       toast.success(`${contact.name} — ${label}`);

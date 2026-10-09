@@ -249,37 +249,44 @@ export function SellerDetailPanel({
         />
       </section>
 
-      {seller.contact_phone && (
-        <div className="flex gap-2">
-          <Button
-            asChild
-            className="flex-1"
-            size="lg"
-            variant="outline"
-            onClick={() => logContact("call", "Call initiated")}
-          >
-            <a href={`tel:${phoneToTel(seller.contact_phone)}`}>
-              <Phone data-icon="inline-start" />
-              Call
-            </a>
-          </Button>
-          <Button
-            asChild
-            className="flex-1"
-            size="lg"
-            onClick={() => logContact("whatsapp", "WhatsApp message sent")}
-          >
-            <a
-              href={`https://wa.me/${phoneToWhatsApp(seller.contact_phone)}`}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <MessageCircle data-icon="inline-start" />
-              WhatsApp
-            </a>
-          </Button>
-        </div>
-      )}
+      {[seller.contact_phone, seller.alt_phone]
+        .filter((p): p is string => Boolean(p))
+        .map((phone, i) => (
+          <div key={`${phone}-${i}`} className="flex flex-col gap-2">
+            {i > 0 && (
+              <p className="text-xs text-muted-foreground">Alt · {formatPhone(phone)}</p>
+            )}
+            <div className="flex gap-2">
+              <Button
+                asChild
+                className="flex-1"
+                size="lg"
+                variant="outline"
+                onClick={() => logContact("call", "Call initiated")}
+              >
+                <a href={`tel:${phoneToTel(phone)}`}>
+                  <Phone data-icon="inline-start" />
+                  Call
+                </a>
+              </Button>
+              <Button
+                asChild
+                className="flex-1"
+                size="lg"
+                onClick={() => logContact("whatsapp", "WhatsApp message sent")}
+              >
+                <a
+                  href={`https://wa.me/${phoneToWhatsApp(phone)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <MessageCircle data-icon="inline-start" />
+                  WhatsApp
+                </a>
+              </Button>
+            </div>
+          </div>
+        ))}
 
       <section className="rounded-lg border border-border bg-card p-4 shadow-card">
         <h2 className="mb-3 text-sm font-semibold">Seller Details</h2>

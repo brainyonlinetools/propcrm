@@ -8,6 +8,7 @@ function makeLead(overrides: Partial<Lead>): Lead {
     id: "1",
     name: "Lead",
     phone: null,
+    alt_phone: null,
     email: null,
     stage_id: null,
     source: null,

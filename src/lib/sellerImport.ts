@@ -1,5 +1,6 @@
 import type { InventoryInsert, Project, SellerInsert } from "@/types";
 import type { BulkImportResult, BulkRowError } from "@/lib/bulkImport";
+import { assignSplitPhones, mergeRemarksPhones } from "@/lib/phoneNumbers";
 
 export const SELLER_IMPORT_HEADERS = [
   "owner_name",
@@ -117,6 +118,7 @@ export function parseSellerRows(
 ): BulkImportResult<SellerInsert> {
   const valid: SellerInsert[] = [];
   const errors: BulkRowError[] = [];
+  const warnings: BulkRowError[] = [];
 
   rows.forEach((row, index) => {
     const rowNum = index + 2;
@@ -169,10 +171,19 @@ export function parseSellerRows(
       return;
     }
 
+    const assigned = assignSplitPhones(
+      getValue(row, "contact_phone"),
+      getValue(row, "alt_phone")
+    );
+    for (const fragment of assigned.dropped) {
+      warnings.push({ row: rowNum, message: `Dropped "${fragment}" (not a phone number)` });
+    }
+    const remarks = mergeRemarksPhones(getValue(row, "remarks"), assigned.extras);
+
     valid.push({
       owner_name: ownerName,
-      contact_phone: getValue(row, "contact_phone") || null,
-      alt_phone: getValue(row, "alt_phone") || null,
+      contact_phone: assigned.primary,
+      alt_phone: assigned.alt,
       email: getValue(row, "email") || null,
       project_id: projectId,
       tower: getValue(row, "tower") || null,
@@ -184,11 +195,11 @@ export function parseSellerRows(
       parking: parking.value,
       asking_price: askingPrice.value,
       available_for_sale: available.value,
-      remarks: getValue(row, "remarks") || null,
+      remarks,
     });
   });
 
-  return { valid, errors };
+  return { valid, errors, warnings };
 }
 
 export interface SellerInventorySource {

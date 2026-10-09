@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CheckSquare, LayoutGrid, List, PhoneCall, Plus, Search, Upload, X, ChevronDown } from "lucide-react";
+import { CheckSquare, LayoutGrid, List, PhoneCall, Plus, RefreshCw, Search, Upload, X, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -28,6 +28,7 @@ import { useIsDesktop } from "@/hooks/useIsDesktop";
 import { leadsKey, useLeads } from "@/lib/queries/leads";
 import { usePipelineStages } from "@/lib/queries/pipelineStages";
 import { useCreateLeadNote, useCreateTask } from "@/lib/queries/tasks";
+import { describeTabSync, triggerSheetSync } from "@/lib/sheetSyncClient";
 import { cn, formatDisplayDate, formatPhone, formatRelativeDate } from "@/lib/utils";
 import {
   CALL_OUTCOME_LABELS,
@@ -59,6 +60,7 @@ export default function LeadsPage() {
   const [stageChangeOpen, setStageChangeOpen] = useState(false);
   const [callQueueOpen, setCallQueueOpen] = useState(false);
   const [callQueue, setCallQueue] = useState<CallQueueContact[]>([]);
+  const [syncing, setSyncing] = useState(false);
   const queryClient = useQueryClient();
   const createLeadNote = useCreateLeadNote();
   const createTask = useCreateTask();
@@ -198,20 +200,64 @@ export default function LeadsPage() {
     setSelectedIds(new Set());
   }
 
+  async function handleSyncNow() {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      const result = await triggerSheetSync(["leads"]);
+      if (result.error || !result.leads) {
+        toast.error(result.error ?? "Sheet sync failed");
+        return;
+      }
+      await queryClient.invalidateQueries({ queryKey: leadsKey });
+      toast.success(describeTabSync("Sheet sync", result.leads));
+      for (const warning of result.leads.warnings.slice(0, 2)) {
+        toast.warning(warning);
+      }
+      for (const error of result.leads.errors.slice(0, 2)) {
+        toast.error(error);
+      }
+    } catch {
+      toast.error("Sheet sync failed");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   function startCalling() {
     const source =
       selectionMode && selectedLeads.length > 0 ? selectedLeads : filtered;
-    const contacts: CallQueueContact[] = source
-      .filter((lead) => lead.phone)
-      .map((lead) => ({
-        id: lead.id,
-        name: lead.name,
-        phone: lead.phone as string,
-        subtitle:
-          [lead.pipeline_stages?.label, lead.project_interest]
-            .filter(Boolean)
-            .join(" · ") || null,
-      }));
+    const contacts: CallQueueContact[] = source.flatMap((lead) => {
+      const base =
+        [lead.pipeline_stages?.label, lead.project_interest]
+          .filter(Boolean)
+          .join(" · ") || null;
+      const additional: string[] = Array.isArray(lead.custom_data?.additional_phones)
+        ? (lead.custom_data.additional_phones as unknown[]).filter(
+            (p): p is string => typeof p === "string" && Boolean(p)
+          )
+        : [];
+      const numbers: { phone: string; tag: string | null }[] = [];
+      if (lead.phone) numbers.push({ phone: lead.phone, tag: null });
+      if (lead.alt_phone) numbers.push({ phone: lead.alt_phone, tag: "Alt" });
+      additional.forEach((phone, i) =>
+        numbers.push({ phone, tag: `Phone ${i + 3}` })
+      );
+      const seen = new Set<string>();
+      return numbers
+        .filter(({ phone }) => {
+          if (seen.has(phone)) return false;
+          seen.add(phone);
+          return true;
+        })
+        .map(({ phone, tag }, i) => ({
+          id: `${lead.id}:${i}`,
+          recordId: lead.id,
+          name: lead.name,
+          phone,
+          subtitle: [base, tag].filter(Boolean).join(" · ") || null,
+        }));
+    });
     if (contacts.length === 0) {
       toast.error("No contacts with phone numbers in this list");
       return;
@@ -228,13 +274,15 @@ export default function LeadsPage() {
     const label = CALL_OUTCOME_LABELS[outcome];
     try {
       await createLeadNote.mutateAsync({
-        lead_id: contact.id,
-        content: opts?.note ? `Call (${label}): ${opts.note}` : `Call: ${label}`,
+        lead_id: contact.recordId,
+        content: opts?.note
+          ? `Call (${label}) ${contact.phone}: ${opts.note}`
+          : `Call (${label}) ${contact.phone}`,
         note_type: "call",
       });
       if (outcome === "callback" && opts?.followUpDate) {
         await createTask.mutateAsync({
-          lead_id: contact.id,
+          lead_id: contact.recordId,
           title: `Call back ${contact.name}`,
           due_date: opts.followUpDate,
           due_time: null,
@@ -267,6 +315,15 @@ export default function LeadsPage() {
             aria-label="Bulk import leads"
           >
             <Upload />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handleSyncNow}
+            disabled={syncing}
+            aria-label="Sync now with Google Sheet"
+          >
+            <RefreshCw className={cn(syncing && "animate-spin")} />
           </Button>
           <Button
             variant="ghost"

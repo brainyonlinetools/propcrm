@@ -55,7 +55,7 @@ export function SellerImportSheet({
     if (!pasteText.trim()) return null;
     const { headers, rows, errors } = parseDelimitedText(pasteText);
     if (errors.length > 0 && rows.length === 0) {
-      return { headers, rows, parseErrors: errors, valid: [], rowErrors: [] as BulkRowError[] };
+      return { headers, rows, parseErrors: errors, valid: [], rowErrors: [] as BulkRowError[], warnings: [] as BulkRowError[] };
     }
     const result = parseSellerRows(rows, projects, projectId);
     return {
@@ -64,6 +64,7 @@ export function SellerImportSheet({
       parseErrors: errors,
       valid: result.valid,
       rowErrors: result.errors,
+      warnings: result.warnings,
     };
   }, [pasteText, projects, projectId]);
 
@@ -242,6 +243,18 @@ export function SellerImportSheet({
                   ))}
                   {parsed.rowErrors.length > 10 && (
                     <li>…and {parsed.rowErrors.length - 10} more errors</li>
+                  )}
+                </ul>
+              )}
+              {parsed.warnings.length > 0 && (
+                <ul className="mt-2 max-h-32 space-y-1 overflow-y-auto text-xs text-amber-600">
+                  {parsed.warnings.slice(0, 10).map((warn) => (
+                    <li key={`${warn.row}-${warn.message}`}>
+                      Row {warn.row}: {warn.message}
+                    </li>
+                  ))}
+                  {parsed.warnings.length > 10 && (
+                    <li>…and {parsed.warnings.length - 10} more warnings</li>
                   )}
                 </ul>
               )}

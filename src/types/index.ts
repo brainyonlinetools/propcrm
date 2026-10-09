@@ -99,6 +99,7 @@ export interface Lead {
   id: string;
   name: string;
   phone: string | null;
+  alt_phone: string | null;
   email: string | null;
   stage_id: string | null;
   source: string | null;
@@ -174,6 +175,7 @@ export interface Task {
 export interface LeadInsert {
   name: string;
   phone?: string | null;
+  alt_phone?: string | null;
   email?: string | null;
   stage_id?: string | null;
   source?: string | null;

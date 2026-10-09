@@ -5,7 +5,7 @@ export interface LeadStatusUpdate {
   status: string;
 }
 
-function getSheetsClient() {
+export function getSheetsClient() {
   const json = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
   if (!json) {
     throw new Error("Missing GOOGLE_SERVICE_ACCOUNT_JSON");
@@ -93,6 +93,45 @@ export async function updateLeadStatusColumn(
 export interface SheetLeadRow {
   sheetRow: number;
   row: Record<string, string>;
+}
+
+/** Generic tab reader keyed by the tab's own header row. Skips fully-empty rows. */
+export async function readSheetTab(tabName: string): Promise<SheetLeadRow[]> {
+  const sheetId = process.env.GOOGLE_SHEET_ID;
+  if (!sheetId) {
+    throw new Error("Missing GOOGLE_SHEET_ID");
+  }
+
+  const sheets = getSheetsClient();
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: `${tabName}!A:ZZ`,
+  });
+
+  const values = response.data.values ?? [];
+  if (values.length < 2) return [];
+
+  const headers = values[0].map((h) => String(h).trim());
+  const rows: SheetLeadRow[] = [];
+
+  for (let i = 1; i < values.length; i++) {
+    const line = values[i];
+    const row: Record<string, string> = {};
+    let hasValue = false;
+
+    headers.forEach((header, index) => {
+      if (!header) return;
+      const cell = line[index];
+      const value = cell != null ? String(cell).trim() : "";
+      row[header] = value;
+      if (value) hasValue = true;
+    });
+
+    if (!hasValue) continue;
+    rows.push({ sheetRow: i + 1, row });
+  }
+
+  return rows;
 }
 
 export async function readMetaLeadRows(

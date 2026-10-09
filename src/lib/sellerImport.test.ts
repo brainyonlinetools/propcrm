@@ -138,6 +138,39 @@ describe("parseSellerRows", () => {
     expect(valid[0].available_for_sale).toBe(false);
     expect(valid[0].project_id).toBeNull();
   });
+
+  it("splits multi-number cells across contact and alt phones", () => {
+    const { valid, warnings } = parseSellerRows(
+      [{ owner_name: "X", contact_phone: "+91 98765 43210, 9811111111" }],
+      projects,
+      "p1"
+    );
+    expect(valid[0].contact_phone).toBe("9876543210");
+    expect(valid[0].alt_phone).toBe("9811111111");
+    expect(warnings).toEqual([]);
+  });
+
+  it("moves third and further numbers into remarks", () => {
+    const { valid } = parseSellerRows(
+      [{ owner_name: "X", contact_phone: "9876543210, 9811111111, 9822222222", remarks: "Call evenings" }],
+      projects,
+      "p1"
+    );
+    expect(valid[0].contact_phone).toBe("9876543210");
+    expect(valid[0].alt_phone).toBe("9811111111");
+    expect(valid[0].remarks).toBe("Call evenings\nOther phones: 9822222222");
+  });
+
+  it("warns on dropped fragments without failing the row", () => {
+    const { valid, warnings, errors } = parseSellerRows(
+      [{ owner_name: "X", contact_phone: "9876543210, 12" }],
+      projects,
+      "p1"
+    );
+    expect(errors).toEqual([]);
+    expect(valid).toHaveLength(1);
+    expect(warnings).toEqual([{ row: 2, message: 'Dropped "12" (not a phone number)' }]);
+  });
 });
 
 describe("mapSellerToInventoryInput", () => {

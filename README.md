@@ -87,49 +87,60 @@ When the app is open, reminders also fire via a client-side poller without waiti
 
 - **Settings** — manage field definitions, pipeline stages, projects, agent name
 
-## Google Sheets ↔ Meta Leads sync
+## Connected Google Sheet sync
 
-New Meta leads in your connected Google Sheet auto-import into the CRM. Each night, the CRM writes pipeline stage back to the existing `lead_status` column (sheet-imported leads only).
+The CRM two-way syncs with one Google Sheet that has a `Leads` tab and an
+`Inventory` tab:
+
+- **Sheet → CRM:** new rows import as leads / inventory units (nightly, or any
+  time via the Sync-now button on the Leads and Inventory headers). Matching
+  rows (same phone/email for leads, same project + unit for inventory) are
+  re-linked, never duplicated, and CRM edits are never overwritten.
+- **CRM → sheet:** each night the CRM writes the pipeline stage back to the
+  `Stage` column and the unit status back to the `Status` column (sheet-linked
+  rows only).
 
 ### Server env vars (Vercel)
 
 See [`.env.example`](.env.example) for the full list. Required for sync:
 
 - `SUPABASE_SERVICE_ROLE_KEY` — server-side DB access
-- `WEBHOOK_SECRET` — authenticates Apps Script → CRM
 - `CRON_SECRET` — authenticates Vercel Cron → CRM
 - `GOOGLE_SHEET_ID` — spreadsheet ID from the sheet URL
+- `GOOGLE_SHEET_LEADS_TAB=Leads` — buyers tab name
+- `GOOGLE_SHEET_INVENTORY_TAB=Inventory` — inventory tab name
 - `GOOGLE_SERVICE_ACCOUNT_JSON` — service account key (single-line JSON)
-- `GOOGLE_SHEET_STATUS_COLUMN=lead_status`
 
-Share the Meta leads sheet with the service account email (Editor).
+Share the sheet with the service account email (Editor). No Apps Script setup
+is needed.
 
-### Google Apps Script setup
+### Leads tab columns
 
-1. Open your Meta leads Google Sheet → **Extensions → Apps Script**
-2. Paste [`scripts/google-sheets-meta-sync.gs`](scripts/google-sheets-meta-sync.gs)
-3. Set `WEBHOOK_URL` to your deployed app + `/api/webhooks/leads`
-4. Set `WEBHOOK_SECRET` to match Vercel env
-5. Run `installTrigger()` once (creates onChange trigger for new rows)
-6. Optionally run `testSyncLastRow()` to test the last row
+`Date, Name, Phone, Email, Stage, Source, Lead Type, Project Interest, Budget,
+Last Date of Call, Notes`
 
-### Backfill existing sheet rows
+- `Name` is required. `Stage` must match a pipeline stage label (else the lead
+  lands in the first stage). `Budget` is in ₹ Cr (`2.5`, `2.5 Cr`, `50 L`, or
+  full rupees all work). `Notes` becomes a lead note on import.
 
-**Option A — from your computer (recommended for many rows):**
+### Inventory tab columns
+
+`Date, Unit Number, Project, Type, Area (sq.ft.), Price, Status, Floor, Facing,
+Parking, Owner Name, Owner Phone, Remarks`
+
+- `Unit Number` is required. `Project` must match a project name. `Status` is
+  one of `available, blocked, booked, sold`. `Remarks` becomes a unit note on
+  import.
+
+### Manual sync from the terminal
 
 ```bash
-npm run backfill:sheet          # import all rows
-npm run backfill:sheet -- --dry-run   # preview without importing
+node --import tsx scripts/sync-connected-sheet.ts            # both tabs
+node --import tsx scripts/sync-connected-sheet.ts leads      # Leads tab only
+node --import tsx scripts/sync-connected-sheet.ts inventory  # Inventory tab only
 ```
 
-Requires `.env.local` with Google + Supabase vars. Duplicates are skipped; existing leads get `sheet_row` updated for nightly status sync.
-
-**Option B — from Google Apps Script:**
-
-1. Update `WEBHOOK_URL`, `WEBHOOK_SECRET`, and `SHEET_TAB_NAME` in the script
-2. Run `backfillAllRows()` once (under ~300 rows)
-3. For larger sheets, run `backfillBatch()` repeatedly until it says complete
-4. Use `resetBackfillCursor()` to start a batch backfill over
+Requires `.env.local` with Google + Supabase vars.
 
 ### Cron schedule
 
@@ -139,11 +150,9 @@ Daily at **11:00 PM IST** (`vercel.json`). Manually test:
 curl -H "Authorization: Bearer $CRON_SECRET" https://your-app.vercel.app/api/cron/sync-sheet-status
 ```
 
-### Test webhook locally
+### Retired: Meta leads sync
 
-```bash
-curl -X POST http://localhost:3000/api/webhooks/leads \
-  -H "Authorization: Bearer $WEBHOOK_SECRET" \
-  -H "Content-Type: application/json" \
-  -d '{"sheet_row":2,"row":{"id":"l:1180939454183866","full_name":"Mukesh Thakur","phone_number":"p:+916209590793","email":"mukeshthakor6209590793@gmail.com","created_time":"2026-06-22T21:28:44+05:30","form_name":"Fresh 2026 (Emaar & SS)","what_is_your_budget_for_investment?":"2.0_cr_-_2.5_cr","what_is_your_preferred_size?":"4bhk","lead_status":"CREATED"}}'
-```
+The old Meta-sheet Apps Script sync (`/api/webhooks/leads`,
+`metaLeadMapper`, `backfill:sheet`) is retired and the webhook returns
+`410 Gone`. The code is kept for reference; delete the Apps Script trigger on
+the old Meta sheet if it still exists.

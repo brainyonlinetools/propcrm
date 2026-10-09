@@ -17,7 +17,10 @@ import { formatPhone, phoneToTel } from "@/lib/utils";
 import { CALL_OUTCOME_LABELS, type CallOutcome } from "@/types";
 
 export interface CallQueueContact {
+  /** Unique per queue entry (one contact can contribute several numbers). */
   id: string;
+  /** Lead/seller id outcomes are logged against. */
+  recordId: string;
   name: string;
   phone: string;
   subtitle?: string | null;
