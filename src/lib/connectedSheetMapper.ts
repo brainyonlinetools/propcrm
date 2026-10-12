@@ -306,10 +306,13 @@ export function mapConnectedInventoryRow(
     const project = options.projects.find(
       (p) => p.name.toLowerCase() === projectName.toLowerCase()
     );
-    if (!project) {
-      return { unit: null, note: null, warnings, error: `Unknown project "${projectName}"` };
+    if (project) {
+      projectId = project.id;
+    } else {
+      // Mirror the app form: free-text project names import unlinked rather
+      // than failing the row.
+      warnings.push(`Unknown project "${projectName}", imported without a project link`);
     }
-    projectId = project.id;
   }
 
   const area = parseSheetNumber(getSheetField(row, "Area (sq.ft.)"), "Area");
@@ -338,6 +341,7 @@ export function mapConnectedInventoryRow(
   const facing = getSheetField(row, "Facing");
   if (facing) customData.facing = facing;
   if (parking.value != null) customData.car_parking = parking.value;
+  if (projectName && !projectId) customData.project_name = projectName;
   const ownerName = getSheetField(row, "Owner Name");
   if (ownerName) customData.owner_name = ownerName;
   const ownerPhones = splitPhoneCell(getSheetField(row, "Owner Phone"));
@@ -599,4 +603,65 @@ export function formatCanonicalForSheet(
   }
   cells.Notes = "";
   return cells;
+}
+
+/** Column order for the Inventory tab header row and appended rows. */
+export const INVENTORY_SHEET_HEADERS = [
+  "Date",
+  "Unit Number",
+  "Project",
+  "Type",
+  "Area (sq.ft.)",
+  "Price",
+  "Status",
+  "Floor",
+  "Facing",
+  "Parking",
+  "Owner Name",
+  "Owner Phone",
+  "Remarks",
+] as const;
+
+export interface AppUnitForSheet {
+  unit_number: string;
+  project_id: string | null;
+  unit_type: string | null;
+  area_sqft: number | null;
+  price: number | null;
+  status: InventoryStatus;
+  acquired_date: string | null;
+  custom_data: unknown;
+}
+
+/** Format an app inventory unit as sheet cells keyed by header. */
+export function formatInventoryForSheet(
+  unit: AppUnitForSheet,
+  projects: Project[]
+): Record<string, string> {
+  const custom = (unit.custom_data ?? {}) as Record<string, unknown>;
+  const str = (value: unknown): string => (typeof value === "string" ? value : "");
+  const num = (value: unknown): string => (typeof value === "number" ? String(value) : "");
+  const projectName =
+    str(custom.project_name) ||
+    projects.find((p) => p.id === unit.project_id)?.name ||
+    "";
+  const ownerPhoneRaw = str(custom.owner_phone);
+  const ownerPhone = ownerPhoneRaw
+    ? (splitPhoneCell(ownerPhoneRaw).numbers[0] ?? ownerPhoneRaw)
+    : "";
+  return {
+    Date: unit.acquired_date ?? "",
+    "Unit Number": unit.unit_number,
+    Project: projectName,
+    Type: unit.unit_type ?? "",
+    "Area (sq.ft.)": unit.area_sqft == null ? "" : String(unit.area_sqft),
+    Price: unit.price == null ? "" : String(unit.price),
+    Status: unit.status,
+    Floor: num(custom.floor),
+    Facing: str(custom.facing),
+    Parking: num(custom.car_parking),
+    "Owner Name": str(custom.owner_name),
+    "Owner Phone": ownerPhone,
+    Remarks: "",
+  };
 }

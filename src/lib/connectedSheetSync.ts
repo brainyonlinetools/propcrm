@@ -20,7 +20,9 @@ import {
   connectedLeadsTab,
   formatCanonicalFieldForSheet,
   formatCanonicalForSheet,
+  formatInventoryForSheet,
   getSheetField,
+  INVENTORY_SHEET_HEADERS,
   isBlankCanon,
   isRangedBudget,
   LEAD_CANONICAL_FIELDS,
@@ -284,6 +286,11 @@ interface ExistingUnit {
   id: string;
   project_id: string | null;
   unit_number: string;
+  unit_type: string | null;
+  area_sqft: number | null;
+  price: number | null;
+  status: InventoryStatus;
+  acquired_date: string | null;
   custom_data: unknown;
 }
 
@@ -639,11 +646,25 @@ export async function syncInventoryFromSheet(): Promise<TabSyncResult> {
   const [{ data: projects, error: projectsError }, { data: existing, error: existingError }, rows] =
     await Promise.all([
       supabase.from("projects").select("id, name"),
-      supabase.from("inventory").select("id, project_id, unit_number, custom_data"),
+      supabase
+        .from("inventory")
+        .select(
+          "id, project_id, unit_number, unit_type, area_sqft, price, status, acquired_date, custom_data"
+        ),
       readSheetTab(tab),
     ]);
   if (projectsError) throw projectsError;
   if (existingError) throw existingError;
+
+  const projectsList = (projects ?? []) as Project[];
+  const merge: LeadMergeStats = {
+    appliedFromSheet: 0,
+    writtenToSheet: 0,
+    skippedStale: 0,
+    conflicts: 0,
+    appended: 0,
+  };
+  const repointedIds = new Set<string>();
 
   const byUnit = new Map<string, ExistingUnit>();
   for (const unit of (existing ?? []) as ExistingUnit[]) {
@@ -659,7 +680,7 @@ export async function syncInventoryFromSheet(): Promise<TabSyncResult> {
       sheetRow,
       sheetId,
       sheetTab: tab,
-      projects: (projects ?? []) as Project[],
+      projects: projectsList,
     });
     if (!mapped.unit) {
       result.errors.push(`${tab} row ${sheetRow}: ${mapped.error}`);
@@ -683,6 +704,11 @@ export async function syncInventoryFromSheet(): Promise<TabSyncResult> {
         id,
         project_id: unit.project_id ?? null,
         unit_number: unit.unit_number,
+        unit_type: unit.unit_type ?? null,
+        area_sqft: unit.area_sqft ?? null,
+        price: unit.price ?? null,
+        status: (unit.status ?? "available") as InventoryStatus,
+        acquired_date: unit.acquired_date ?? null,
         custom_data: unit.custom_data,
       };
       pending.set(id, { id, sheetRow, unit, note: mapped.note, ref });
@@ -697,6 +723,7 @@ export async function syncInventoryFromSheet(): Promise<TabSyncResult> {
       unflushed.ref.custom_data = merged;
       result.repointed++;
     } else {
+      repointedIds.add(match.id);
       repoints.push({ id: match.id, sheetRow, customData: merged });
     }
   }
@@ -737,7 +764,66 @@ export async function syncInventoryFromSheet(): Promise<TabSyncResult> {
     await supabase.from("inventory_notes").insert(notes);
   }
 
+  try {
+    const maxSheetRow = rows.reduce((max, r) => Math.max(max, r.sheetRow), 1);
+    merge.appended = await appendUntrackedUnits(
+      supabase,
+      sheetId,
+      tab,
+      (existing ?? []) as ExistingUnit[],
+      repointedIds,
+      projectsList,
+      maxSheetRow + 1
+    );
+  } catch (err) {
+    result.errors.push(
+      `Sheet append failed: ${err instanceof Error ? err.message : "unknown error"}`
+    );
+  }
+
+  result.merge = merge;
   return result;
+}
+
+/**
+ * Append app-created units (never tracked to any sheet row) to the bottom of
+ * the tab, then record their tracking so the next sync matches instead of
+ * duplicating. Units already matched to a sheet row this run are excluded
+ * via repointedIds.
+ */
+async function appendUntrackedUnits(
+  supabase: ReturnType<typeof createSupabaseAdmin>,
+  sheetId: string,
+  tab: string,
+  existing: ExistingUnit[],
+  repointedIds: Set<string>,
+  projects: Project[],
+  startRow: number
+): Promise<number> {
+  const candidates = existing.filter((unit) => {
+    const tracking = unit.custom_data as Record<string, unknown> | null;
+    return tracking?.sheet_id == null && !repointedIds.has(unit.id);
+  });
+  if (candidates.length === 0) return 0;
+
+  const rows = candidates.map((unit) => {
+    const cells = formatInventoryForSheet(unit, projects);
+    return INVENTORY_SHEET_HEADERS.map((header) => cells[header] ?? "");
+  });
+  await appendSheetRows(tab, startRow, rows);
+
+  await mapWithConcurrency(candidates, WRITE_CONCURRENCY, async (unit, index) => {
+    const custom = mergeTracking(
+      unit.custom_data,
+      buildSheetTracking(sheetId, tab, startRow + index)
+    );
+    const { error } = await supabase
+      .from("inventory")
+      .update({ custom_data: custom as Json })
+      .eq("id", unit.id);
+    if (error) throw new Error(error.message);
+  });
+  return candidates.length;
 }
 
 interface TrackedUnit {

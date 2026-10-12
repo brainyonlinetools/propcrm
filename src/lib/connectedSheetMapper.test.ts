@@ -3,6 +3,8 @@ import {
   canonicalFromAppLead,
   canonicalFromSheetRow,
   formatCanonicalForSheet,
+  formatInventoryForSheet,
+  INVENTORY_SHEET_HEADERS,
   isBlankCanon,
   isRangedBudget,
   looksLikeHeaderRow,
@@ -339,13 +341,17 @@ describe("mapConnectedInventoryRow", () => {
     expect(result.error).toBe("Unit Number is required");
   });
 
-  it("rejects unknown projects", () => {
+  it("imports unknown projects unlinked with a warning", () => {
     const result = mapConnectedInventoryRow(
       { "Unit Number": "A-1", Project: "Unknown Towers" },
       opts
     );
-    expect(result.unit).toBeNull();
-    expect(result.error).toBe('Unknown project "Unknown Towers"');
+    expect(result.error).toBeUndefined();
+    expect(result.unit?.project_id).toBeNull();
+    expect(result.unit?.custom_data).toMatchObject({ project_name: "Unknown Towers" });
+    expect(result.warnings).toEqual([
+      'Unknown project "Unknown Towers", imported without a project link',
+    ]);
   });
 
   it("warns on unparsable dates but still maps", () => {
@@ -374,6 +380,82 @@ describe("mapConnectedInventoryRow", () => {
     expect(unit?.custom_data).toMatchObject({ owner_phone: "9811111111" });
     expect(note).toBe("Other phones: 9822222222");
     expect(warnings).toEqual(["Extra owner phone kept in remarks: 9822222222"]);
+  });
+});
+
+describe("formatInventoryForSheet", () => {
+  const unit = {
+    unit_number: "N150C",
+    project_id: null,
+    unit_type: "2.5 BHK",
+    area_sqft: 1208,
+    price: 1400000,
+    status: "available" as const,
+    acquired_date: "2026-06-30",
+    custom_data: {
+      floor: 3,
+      facing: "East",
+      car_parking: 1,
+      owner_name: "Seema",
+      owner_phone: "+91 99908 98759",
+      project_name: "Smartworld Gems",
+    },
+  };
+
+  it("formats an app unit as sheet cells in header order", () => {
+    const cells = formatInventoryForSheet(unit, projects);
+    expect(INVENTORY_SHEET_HEADERS).toHaveLength(13);
+    expect(INVENTORY_SHEET_HEADERS.map((h) => cells[h])).toEqual([
+      "2026-06-30",
+      "N150C",
+      "Smartworld Gems",
+      "2.5 BHK",
+      "1208",
+      "1400000",
+      "available",
+      "3",
+      "East",
+      "1",
+      "Seema",
+      "9990898759",
+      "",
+    ]);
+  });
+
+  it("round-trips through the inventory row parser", () => {
+    const cells = formatInventoryForSheet(unit, projects);
+    const { unit: parsed, error } = mapConnectedInventoryRow(cells, {
+      sheetRow: 2,
+      sheetId: "sheet1",
+      sheetTab: "Inventory",
+      projects,
+    });
+    expect(error).toBeUndefined();
+    expect(parsed).toMatchObject({
+      unit_number: "N150C",
+      project_id: null,
+      unit_type: "2.5 BHK",
+      area_sqft: 1208,
+      price: 1400000,
+      status: "available",
+      acquired_date: "2026-06-30",
+    });
+    expect(parsed?.custom_data).toMatchObject({
+      floor: 3,
+      facing: "East",
+      car_parking: 1,
+      owner_name: "Seema",
+      owner_phone: "9990898759",
+      project_name: "Smartworld Gems",
+    });
+  });
+
+  it("resolves the project name from the linked id when set", () => {
+    const cells = formatInventoryForSheet(
+      { ...unit, project_id: "p1", custom_data: {} },
+      [{ id: "p1", name: "Anand Prime Residences" }] as Project[]
+    );
+    expect(cells.Project).toBe("Anand Prime Residences");
   });
 });
 
