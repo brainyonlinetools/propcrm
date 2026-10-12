@@ -146,6 +146,47 @@ export interface MapConnectedLeadResult {
   note: string | null;
   warnings: string[];
   error?: string;
+  /** Set when the row is silently skipped (header row, effectively empty). */
+  skipped?: string;
+}
+
+/** Cell fillers that mean "no value" (never imported literally). */
+const SHEET_PLACEHOLDERS = new Set(["-", "--", "na", "n/a", "nil", "none"]);
+
+export function normalizeSheetText(raw: string): string {
+  const text = raw.trim();
+  return SHEET_PLACEHOLDERS.has(text.toLowerCase()) ? "" : text;
+}
+
+/** Meta-export header tokens, stripped of spaces/underscores for comparison. */
+const HEADER_LIKE_TOKENS = new Set([
+  "fullname",
+  "firstname",
+  "lastname",
+  "phonenumber",
+  "email",
+  "campaignname",
+  "adname",
+  "adsetname",
+  "formname",
+  "createdtime",
+  "leadstatus",
+]);
+
+function isHeaderLikeCell(value: string): boolean {
+  const compact = value.trim().toLowerCase().replace(/[\s_]+/g, "");
+  return compact !== "" && HEADER_LIKE_TOKENS.has(compact);
+}
+
+/** Pasted header rows (e.g. Meta export columns) are never leads. */
+export function looksLikeHeaderRow(row: Record<string, string>): boolean {
+  const cells = [
+    getSheetField(row, "Name"),
+    getSheetField(row, "Email"),
+    getSheetField(row, "Source"),
+    getSheetField(row, "Project Interest"),
+  ];
+  return cells.filter(isHeaderLikeCell).length >= 2;
 }
 
 export function mapConnectedLeadRow(
@@ -153,7 +194,10 @@ export function mapConnectedLeadRow(
   options: { sheetRow: number; sheetId: string; sheetTab: string; stages: PipelineStage[] }
 ): MapConnectedLeadResult {
   const warnings: string[] = [];
-  const nameField = getSheetField(row, "Name");
+  if (looksLikeHeaderRow(row)) {
+    return { lead: null, note: null, warnings, skipped: "looks like a header row" };
+  }
+  const nameField = normalizeSheetText(getSheetField(row, "Name"));
   const name = nameField || `Lead ${options.sheetRow}`;
   if (!nameField) {
     warnings.push(`Missing name, used "${name}"`);
@@ -181,7 +225,7 @@ export function mapConnectedLeadRow(
     warnings.push(`Could not parse budget "${budgetRaw}"`);
   }
 
-  const leadType = getSheetField(row, "Lead Type");
+  const leadType = normalizeSheetText(getSheetField(row, "Lead Type"));
   const lastCallRaw = getSheetField(row, "Last Date of Call");
   const lastCall = parseSheetDate(lastCallRaw);
   if (lastCallRaw && !lastCall) {
@@ -194,9 +238,19 @@ export function mapConnectedLeadRow(
     warnings.push(`Could not parse date "${dateRaw}"`);
   }
 
+  const emailField = normalizeSheetText(getSheetField(row, "Email"));
+  const sourceField = normalizeSheetText(getSheetField(row, "Source"));
+  const projectField = normalizeSheetText(getSheetField(row, "Project Interest"));
   const assigned = assignSplitPhones(getSheetField(row, "Phone"));
   for (const fragment of assigned.dropped) {
     warnings.push(`Dropped "${fragment}" (not a phone number)`);
+  }
+
+  // Rows with no name and no contact info (e.g. a lone Stage cell left
+  // behind by row clears) are not leads — skip instead of minting
+  // "Lead N" placeholders.
+  if (!nameField && !assigned.primary && !emailField) {
+    return { lead: null, note: null, warnings, skipped: "row has no name or contact info" };
   }
 
   const customData: Record<string, unknown> = {
@@ -215,10 +269,10 @@ export function mapConnectedLeadRow(
       name,
       phone: assigned.primary,
       alt_phone: assigned.alt,
-      email: getSheetField(row, "Email")?.toLowerCase() || null,
-      source: getSheetField(row, "Source") || null,
+      email: emailField.toLowerCase() || null,
+      source: sourceField || null,
       stage_id: stageId,
-      project_interest: getSheetField(row, "Project Interest") || null,
+      project_interest: projectField || null,
       acquired_date: acquiredDate,
       custom_data: customData,
     },
@@ -403,13 +457,13 @@ export function canonicalFromSheetRow(
     ? stages.find((s) => s.label.toLowerCase() === stageRaw.toLowerCase())
     : undefined;
   return {
-    name: getSheetField(row, "Name"),
+    name: normalizeSheetText(getSheetField(row, "Name")),
     phone: splitPhoneCell(getSheetField(row, "Phone")).numbers.join(", "),
-    email: getSheetField(row, "Email").toLowerCase(),
+    email: normalizeSheetText(getSheetField(row, "Email")).toLowerCase(),
     stage: stageMatch ? stageMatch.label : null,
-    source: getSheetField(row, "Source"),
-    leadType: getSheetField(row, "Lead Type"),
-    project: getSheetField(row, "Project Interest"),
+    source: normalizeSheetText(getSheetField(row, "Source")),
+    leadType: normalizeSheetText(getSheetField(row, "Lead Type")),
+    project: normalizeSheetText(getSheetField(row, "Project Interest")),
     budget: parseBudgetCr(getSheetField(row, "Budget")),
     date: parseSheetDate(getSheetField(row, "Date")),
     lastCall: parseSheetDate(getSheetField(row, "Last Date of Call")),

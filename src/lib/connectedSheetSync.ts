@@ -344,6 +344,7 @@ export async function syncLeadsFromSheet(): Promise<TabSyncResult> {
   const pending = new Map<string, PendingLeadCreate>();
   const repoints: RepointUpdate[] = [];
   const trackedByRow = buildTrackedRowMap((existing ?? []) as ExistingLead[], sheetId, tab);
+  let skippedNonLeads = 0;
 
   for (const { sheetRow, row } of rows) {
     const mapped = mapConnectedLeadRow(row, {
@@ -352,6 +353,10 @@ export async function syncLeadsFromSheet(): Promise<TabSyncResult> {
       sheetTab: tab,
       stages: stagesList,
     });
+    if (mapped.skipped) {
+      skippedNonLeads++;
+      continue;
+    }
     if (!mapped.lead) {
       result.errors.push(`${tab} row ${sheetRow}: ${mapped.error}`);
       continue;
@@ -498,6 +503,12 @@ export async function syncLeadsFromSheet(): Promise<TabSyncResult> {
     });
   }
 
+  if (skippedNonLeads > 0) {
+    result.warnings.push(
+      `${tab}: skipped ${skippedNonLeads} non-lead row(s) (headers/empty)`
+    );
+  }
+
   await mapWithConcurrency(repoints, WRITE_CONCURRENCY, async (repoint) => {
     const { error } = await supabase
       .from("leads")
@@ -552,13 +563,15 @@ export async function syncLeadsFromSheet(): Promise<TabSyncResult> {
   }
 
   try {
+    const maxSheetRow = rows.reduce((max, r) => Math.max(max, r.sheetRow), 1);
     merge.appended = await appendUntrackedLeads(
       supabase,
       sheetId,
       tab,
       (existing ?? []) as ExistingLead[],
       repointedIds,
-      stagesList
+      stagesList,
+      maxSheetRow + 1
     );
   } catch (err) {
     result.errors.push(
@@ -582,7 +595,8 @@ async function appendUntrackedLeads(
   tab: string,
   existing: ExistingLead[],
   repointedIds: Set<string>,
-  stages: PipelineStage[]
+  stages: PipelineStage[],
+  startRow: number
 ): Promise<number> {
   const candidates = existing.filter((lead) => {
     const tracking = lead.custom_data as Record<string, unknown> | null;
@@ -596,7 +610,7 @@ async function appendUntrackedLeads(
     if (typeof raw === "string" && raw) cells.Budget = raw;
     return LEAD_SHEET_HEADERS.map((header) => cells[header] ?? "");
   });
-  const { startRow } = await appendSheetRows(tab, rows);
+  await appendSheetRows(tab, startRow, rows);
 
   const syncedAt = new Date().toISOString();
   await mapWithConcurrency(candidates, WRITE_CONCURRENCY, async (lead, index) => {

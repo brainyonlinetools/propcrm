@@ -5,8 +5,10 @@ import {
   formatCanonicalForSheet,
   isBlankCanon,
   isRangedBudget,
+  looksLikeHeaderRow,
   mapConnectedInventoryRow,
   mapConnectedLeadRow,
+  normalizeSheetText,
   parseBudgetCr,
   parseSheetDate,
   parseSheetPhone,
@@ -115,6 +117,32 @@ describe("isRangedBudget", () => {
   });
 });
 
+describe("normalizeSheetText", () => {
+  it("blanks placeholder fillers and keeps real values", () => {
+    expect(normalizeSheetText("-")).toBe("");
+    expect(normalizeSheetText("  NA ")).toBe("");
+    expect(normalizeSheetText("n/a")).toBe("");
+    expect(normalizeSheetText("Emaar Palm Hills")).toBe("Emaar Palm Hills");
+    expect(normalizeSheetText("SS Cendana")).toBe("SS Cendana");
+  });
+});
+
+describe("looksLikeHeaderRow", () => {
+  it("flags rows reusing export header names", () => {
+    expect(
+      looksLikeHeaderRow({ Name: "full_name", Email: "email", Source: "Meta" })
+    ).toBe(true);
+    expect(
+      looksLikeHeaderRow({ Name: "campaign_name", "Project Interest": "adset_name" })
+    ).toBe(true);
+  });
+
+  it("passes real leads, even with one header-like cell", () => {
+    expect(looksLikeHeaderRow({ Name: "Rahul", Email: "r@example.com" })).toBe(false);
+    expect(looksLikeHeaderRow({ Name: "full_name", Phone: "9876543210" })).toBe(false);
+  });
+});
+
 describe("mapConnectedLeadRow", () => {
   const opts = { sheetRow: 2, sheetId: "sheet1", sheetTab: "Leads", stages };
 
@@ -201,6 +229,35 @@ describe("mapConnectedLeadRow", () => {
     const { lead } = mapConnectedLeadRow({ Name: "X", Budget: "2.5 Cr" }, opts);
     expect(lead?.custom_data).toMatchObject({ budget: 2.5 });
     expect(lead?.custom_data).not.toHaveProperty("budget_raw");
+  });
+
+  it("skips pasted header rows instead of importing them as leads", () => {
+    const result = mapConnectedLeadRow(
+      {
+        Name: "full_name",
+        Email: "email",
+        Source: "Meta",
+        "Project Interest": "campaign_name",
+      },
+      opts
+    );
+    expect(result.lead).toBeNull();
+    expect(result.skipped).toBe("looks like a header row");
+  });
+
+  it("skips rows with no name and no contact info", () => {
+    const result = mapConnectedLeadRow({ Stage: "New" }, opts);
+    expect(result.lead).toBeNull();
+    expect(result.skipped).toBe("row has no name or contact info");
+  });
+
+  it("treats placeholder fillers as empty, not literal values", () => {
+    const { lead } = mapConnectedLeadRow(
+      { Name: "Himanshu", Phone: "9953240037", Email: "-", Source: "NA" },
+      opts
+    );
+    expect(lead?.email).toBeNull();
+    expect(lead?.source).toBeNull();
   });
 
   it("splits multi-number phone cells into phone, alt, and extras", () => {

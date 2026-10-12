@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  appendRangeFor,
+  blocksMatch,
   describeSheetsError,
   partitionInBoundsUpdates,
   sheetRowMatchesIdentity,
@@ -49,8 +51,42 @@ describe("describeSheetsError", () => {
   });
 });
 
+describe("appendRangeFor", () => {
+  it("builds an explicit A1 block range starting at column A", () => {
+    expect(appendRangeFor("Leads", 1577, 14, 11)).toBe("Leads!A1577:K1590");
+    expect(appendRangeFor("Leads", 2, 1, 11)).toBe("Leads!A2:K2");
+  });
+});
+
+describe("blocksMatch", () => {
+  it("matches identical blocks", () => {
+    expect(
+      blocksMatch(
+        [["a", "b"], ["c", ""]],
+        [["a", "b"], ["c", ""]]
+      )
+    ).toBe(true);
+  });
+
+  it("ignores trimmed trailing empties in the read-back", () => {
+    expect(blocksMatch([["a", "", ""]], [["a"]])).toBe(true);
+    expect(blocksMatch([["a", "b"]], [["a"]])).toBe(false);
+  });
+
+  it("rejects shifted or missing content", () => {
+    expect(
+      blocksMatch(
+        [["2026-07-12", "Shubham"]],
+        [["", "", "", "", "2026-07-12", "Shubham"]]
+      )
+    ).toBe(false);
+    expect(blocksMatch([["a"], ["b"]], [["a"]])).toBe(false);
+    expect(blocksMatch([["a"]], undefined)).toBe(false);
+  });
+});
+
 describe("partitionInBoundsUpdates", () => {
-  const limits = { rowCount: 1577, columnCount: 26 };
+  const limits = { rowCount: 1577, columnCount: 26, sheetId: 0 };
 
   it("keeps rows inside the grid", () => {
     const updates = [

@@ -107,6 +107,8 @@ export async function getColumnIndexByHeader(
 export interface SheetGridLimits {
   rowCount: number;
   columnCount: number;
+  /** Numeric tab id, for grid-property updates. */
+  sheetId: number;
 }
 
 export interface StatusWriteResult {
@@ -209,36 +211,110 @@ export async function writeSheetCells(
   return { writtenCells: data.length, writtenRows: writtenRowSet.size, skippedRows };
 }
 
-/** Append rows at the bottom of one tab; returns the first appended row number. */
+/** A1 range for an explicit append block starting at column A. */
+export function appendRangeFor(
+  sheetName: string,
+  startRow: number,
+  rowCount: number,
+  width: number
+): string {
+  const endCol = columnIndexToLetter(Math.max(0, width - 1));
+  return `${sheetName}!A${startRow}:${endCol}${startRow + rowCount - 1}`;
+}
+
+/** Compare a written block against a read-back, ignoring trimmed trailing empties. */
+export function blocksMatch(expected: string[][], actual: unknown[][] | undefined): boolean {
+  const trim = (row: unknown[]): string[] => {
+    const cells = row.map((c) => String(c ?? ""));
+    while (cells.length > 0 && cells[cells.length - 1] === "") cells.pop();
+    return cells;
+  };
+  if ((actual ?? []).length !== expected.length) return false;
+  return expected.every(
+    (row, i) => JSON.stringify(trim(row)) === JSON.stringify(trim(actual![i] ?? []))
+  );
+}
+
+/**
+ * Append rows at an explicit start row via values.update. values.append's
+ * table inference once placed rows in the wrong columns, so callers compute
+ * startRow from the rows they just read and the write is verified by
+ * read-back (mismatches are cleared and thrown, never silently kept).
+ */
 export async function appendSheetRows(
   sheetName: string,
+  startRow: number,
   rows: string[][]
 ): Promise<{ startRow: number; appended: number }> {
-  if (rows.length === 0) return { startRow: 0, appended: 0 };
+  if (rows.length === 0) return { startRow, appended: 0 };
   const sheetId = process.env.GOOGLE_SHEET_ID;
   if (!sheetId) {
     throw new Error("Missing GOOGLE_SHEET_ID");
   }
+  if (!Number.isInteger(startRow) || startRow < 2) {
+    throw new Error(`Cannot append to ${sheetName} at row ${startRow}`);
+  }
+  const width = Math.max(...rows.map((r) => r.length));
+  const range = appendRangeFor(sheetName, startRow, rows.length, width);
+
+  await ensureSheetRows(sheetId, sheetName, startRow + rows.length - 1);
+
   const sheets = getSheetsClient();
-  let response;
   try {
-    response = await sheets.spreadsheets.values.append({
+    await sheets.spreadsheets.values.update({
       spreadsheetId: sheetId,
-      range: `${sheetName}!A:ZZ`,
+      range,
       valueInputOption: "RAW",
       requestBody: { values: rows },
     });
   } catch (err) {
     throw new Error(describeSheetsError(err, { tab: sheetName }));
   }
-  const updatedRange = response.data.updates?.updatedRange ?? "";
-  const match = updatedRange.match(/![^!]*?[A-Z]+(\d+)/);
-  if (!match) {
+
+  let check;
+  try {
+    check = await sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range });
+  } catch (err) {
+    throw new Error(describeSheetsError(err, { tab: sheetName }));
+  }
+  if (!blocksMatch(rows, check.data.values as unknown[][] | undefined)) {
+    await sheets.spreadsheets.values.clear({ spreadsheetId: sheetId, range });
     throw new Error(
-      `Could not determine appended rows from "${updatedRange || "append response"}"`
+      `Appended rows to "${sheetName}" did not verify at ${range}; the range was cleared, try sync again.`
     );
   }
-  return { startRow: Number(match[1]), appended: rows.length };
+  return { startRow, appended: rows.length };
+}
+
+/** Grow a tab's grid so it holds at least minRows rows (no-op when it fits). */
+export async function ensureSheetRows(
+  sheetId: string,
+  sheetName: string,
+  minRows: number
+): Promise<void> {
+  const limits = await getSheetGridLimits(sheetId, sheetName);
+  if (minRows <= limits.rowCount) return;
+  const sheets = getSheetsClient();
+  try {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: sheetId,
+      requestBody: {
+        requests: [
+          {
+            updateSheetProperties: {
+              properties: {
+                sheetId: limits.sheetId,
+                gridProperties: { rowCount: minRows },
+              },
+              fields: "gridProperties.rowCount",
+            },
+          },
+        ],
+      },
+    });
+  } catch (err) {
+    throw new Error(describeSheetsError(err, { tab: sheetName }));
+  }
 }
 
 /** Ranges per values.batchUpdate call; keeps payloads small and failures contained. */
@@ -254,7 +330,7 @@ export async function getSheetGridLimits(
   try {
     response = await sheets.spreadsheets.get({
       spreadsheetId: sheetId,
-      fields: "sheets.properties.title,sheets.properties.gridProperties",
+      fields: "sheets.properties.title,sheets.properties.sheetId,sheets.properties.gridProperties",
     });
   } catch (err) {
     throw new Error(describeSheetsError(err, { tab: sheetName }));
@@ -263,13 +339,14 @@ export async function getSheetGridLimits(
     (entry) => entry.properties?.title === sheetName
   );
   const grid = match?.properties?.gridProperties;
-  if (!grid?.rowCount || !grid?.columnCount) {
+  const tabId = match?.properties?.sheetId;
+  if (!grid?.rowCount || !grid?.columnCount || typeof tabId !== "number") {
     throw new Error(
       `Tab "${sheetName}" was not found in the connected spreadsheet. ` +
         `Check GOOGLE_SHEET_LEADS_TAB and GOOGLE_SHEET_INVENTORY_TAB.`
     );
   }
-  return { rowCount: grid.rowCount, columnCount: grid.columnCount };
+  return { rowCount: grid.rowCount, columnCount: grid.columnCount, sheetId: tabId };
 }
 
 /**
