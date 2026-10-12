@@ -75,6 +75,7 @@ function summarize(
       created: result.leads.created,
       repointed: result.leads.repointed,
       writtenBack: result.writeBack.leads.synced,
+      appended: result.leads.merge?.appended ?? 0,
       warnings: result.leads.warnings.slice(0, 5),
       errors: result.leads.errors.slice(0, 5),
     };
@@ -84,6 +85,7 @@ function summarize(
       created: result.inventory.created,
       repointed: result.inventory.repointed,
       writtenBack: result.writeBack.inventory.synced,
+      appended: result.inventory.merge?.appended ?? 0,
       warnings: result.inventory.warnings.slice(0, 5),
       errors: result.inventory.errors.slice(0, 5),
     };

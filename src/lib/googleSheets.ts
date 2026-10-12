@@ -114,6 +114,133 @@ export interface StatusWriteResult {
   skippedRows: number[];
 }
 
+export interface SheetCellWrite {
+  row: number;
+  header: string;
+  value: string;
+}
+
+export interface SheetCellsWriteResult {
+  writtenCells: number;
+  writtenRows: number;
+  skippedRows: number[];
+}
+
+/** Header row of one tab, in column order. */
+export async function readSheetHeaders(sheetId: string, sheetName: string): Promise<string[]> {
+  const sheets = getSheetsClient();
+  let response;
+  try {
+    response = await sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId,
+      range: `${sheetName}!1:1`,
+    });
+  } catch (err) {
+    throw new Error(describeSheetsError(err, { tab: sheetName }));
+  }
+  return (response.data.values?.[0] ?? []).map((h) => String(h ?? ""));
+}
+
+/**
+ * Write arbitrary cells by header name, skipping rows outside the current
+ * grid (same stale-row protection as the status write-back).
+ */
+export async function writeSheetCells(
+  sheetName: string,
+  cells: SheetCellWrite[]
+): Promise<SheetCellsWriteResult> {
+  if (cells.length === 0) return { writtenCells: 0, writtenRows: 0, skippedRows: [] };
+  const sheetId = process.env.GOOGLE_SHEET_ID;
+  if (!sheetId) {
+    throw new Error("Missing GOOGLE_SHEET_ID");
+  }
+
+  const [headers, limits] = await Promise.all([
+    readSheetHeaders(sheetId, sheetName),
+    getSheetGridLimits(sheetId, sheetName),
+  ]);
+  const columnByHeader = new Map<string, number>();
+  headers.forEach((header, index) => {
+    const key = header.trim().toLowerCase();
+    if (key && !columnByHeader.has(key)) columnByHeader.set(key, index);
+  });
+
+  const skippedRows: number[] = [];
+  const data: { range: string; values: string[][] }[] = [];
+  const writtenRowSet = new Set<number>();
+  for (const cell of cells) {
+    const column = columnByHeader.get(cell.header.trim().toLowerCase());
+    if (column === undefined) {
+      throw new Error(`Column "${cell.header}" not found in sheet header row`);
+    }
+    const { inBounds } = partitionInBoundsUpdates(
+      [{ row: cell.row, status: cell.value }],
+      column,
+      limits
+    );
+    if (inBounds.length === 0) {
+      skippedRows.push(cell.row);
+      continue;
+    }
+    data.push({
+      range: `${sheetName}!${columnIndexToLetter(column)}${cell.row}`,
+      values: [[cell.value]],
+    });
+    writtenRowSet.add(cell.row);
+  }
+  if (data.length === 0) {
+    return { writtenCells: 0, writtenRows: 0, skippedRows };
+  }
+
+  const sheets = getSheetsClient();
+  for (let i = 0; i < data.length; i += WRITE_CHUNK_SIZE) {
+    try {
+      await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId: sheetId,
+        requestBody: {
+          valueInputOption: "RAW",
+          data: data.slice(i, i + WRITE_CHUNK_SIZE),
+        },
+      });
+    } catch (err) {
+      throw new Error(describeSheetsError(err, { tab: sheetName }));
+    }
+  }
+  return { writtenCells: data.length, writtenRows: writtenRowSet.size, skippedRows };
+}
+
+/** Append rows at the bottom of one tab; returns the first appended row number. */
+export async function appendSheetRows(
+  sheetName: string,
+  rows: string[][]
+): Promise<{ startRow: number; appended: number }> {
+  if (rows.length === 0) return { startRow: 0, appended: 0 };
+  const sheetId = process.env.GOOGLE_SHEET_ID;
+  if (!sheetId) {
+    throw new Error("Missing GOOGLE_SHEET_ID");
+  }
+  const sheets = getSheetsClient();
+  let response;
+  try {
+    response = await sheets.spreadsheets.values.append({
+      spreadsheetId: sheetId,
+      range: `${sheetName}!A:ZZ`,
+      valueInputOption: "RAW",
+      requestBody: { values: rows },
+    });
+  } catch (err) {
+    throw new Error(describeSheetsError(err, { tab: sheetName }));
+  }
+  const updatedRange = response.data.updates?.updatedRange ?? "";
+  const match = updatedRange.match(/![^!]*?[A-Z]+(\d+)/);
+  if (!match) {
+    throw new Error(
+      `Could not determine appended rows from "${updatedRange || "append response"}"`
+    );
+  }
+  return { startRow: Number(match[1]), appended: rows.length };
+}
+
 /** Ranges per values.batchUpdate call; keeps payloads small and failures contained. */
 const WRITE_CHUNK_SIZE = 500;
 

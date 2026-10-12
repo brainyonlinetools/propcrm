@@ -2,6 +2,7 @@ export interface ManualSyncTabSummary {
   created: number;
   repointed: number;
   writtenBack: number;
+  appended?: number;
   warnings: string[];
   errors: string[];
 }
@@ -32,6 +33,9 @@ export function describeTabSync(label: string, summary: ManualSyncTabSummary): s
   const parts = [`${summary.created} new`, `${summary.repointed} matched`];
   if (summary.writtenBack > 0) {
     parts.push(`${summary.writtenBack} updated in sheet`);
+  }
+  if (summary.appended != null && summary.appended > 0) {
+    parts.push(`${summary.appended} added to sheet`);
   }
   return `${label}: ${parts.join(", ")}`;
 }

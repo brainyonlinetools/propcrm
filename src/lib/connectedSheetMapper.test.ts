@@ -1,10 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
+  canonicalFromAppLead,
+  canonicalFromSheetRow,
+  formatCanonicalForSheet,
+  isBlankCanon,
+  isRangedBudget,
   mapConnectedInventoryRow,
   mapConnectedLeadRow,
   parseBudgetCr,
   parseSheetDate,
   parseSheetPhone,
+  readSnapshot,
+  resolveField,
+  seedSheetSnapshot,
+  type LeadCanonical,
 } from "@/lib/connectedSheetMapper";
 import type { PipelineStage, Project } from "@/types";
 
@@ -68,12 +77,41 @@ describe("parseBudgetCr", () => {
     expect(parseBudgetCr("50 L")).toBe(0.5);
     expect(parseBudgetCr("25000000")).toBe(2.5);
     expect(parseBudgetCr("2,85,00,000")).toBe(2.85);
+    expect(parseBudgetCr("₹11,000")).toBeCloseTo(0.0011, 6);
+  });
+
+  it("parses ranges to the midpoint", () => {
+    expect(parseBudgetCr("₹1.5 Cr - ₹2.0 Cr")).toBe(1.75);
+    expect(parseBudgetCr("₹2.5 Cr - ₹3.5 Cr")).toBe(3);
+    expect(parseBudgetCr("₹1.8 Cr - ₹2.0 Cr")).toBe(1.9);
+    expect(parseBudgetCr("₹50 Lac - ₹1.0 Cr")).toBe(0.75);
+    expect(parseBudgetCr("₹3.0 Cr - ₹4.0 Cr")).toBe(3.5);
+    expect(parseBudgetCr("₹1.0 Cr - ₹2.0 Cr")).toBe(1.5);
+    expect(parseBudgetCr("1.5 - 2.0 Cr")).toBe(1.75);
+  });
+
+  it("parses open bounds to the bound", () => {
+    expect(parseBudgetCr("₹3.5 Cr+")).toBe(3.5);
+    expect(parseBudgetCr("₹2.5 Cr+")).toBe(2.5);
+    expect(parseBudgetCr("₹4.0 Cr+")).toBe(4);
+    expect(parseBudgetCr("₹2.0 Cr+")).toBe(2);
+    expect(parseBudgetCr("< ₹50 Lac")).toBe(0.5);
   });
 
   it("returns null for empty or unparsable values", () => {
     expect(parseBudgetCr("")).toBeNull();
     expect(parseBudgetCr(undefined)).toBeNull();
     expect(parseBudgetCr("lots")).toBeNull();
+  });
+});
+
+describe("isRangedBudget", () => {
+  it("detects range and bound markers", () => {
+    expect(isRangedBudget("₹1.5 Cr - ₹2.0 Cr")).toBe(true);
+    expect(isRangedBudget("₹3.5 Cr+")).toBe(true);
+    expect(isRangedBudget("< ₹50 Lac")).toBe(true);
+    expect(isRangedBudget("2.5 Cr")).toBe(false);
+    expect(isRangedBudget("50 L")).toBe(false);
   });
 });
 
@@ -144,6 +182,25 @@ describe("mapConnectedLeadRow", () => {
     );
     expect(lead).not.toBeNull();
     expect(warnings).toEqual(['Could not parse budget "lots"']);
+  });
+
+  it("maps a ranged budget to the midpoint and keeps the raw text", () => {
+    const { lead, warnings, error } = mapConnectedLeadRow(
+      { Name: "X", Budget: "₹1.5 Cr - ₹2.0 Cr" },
+      opts
+    );
+    expect(error).toBeUndefined();
+    expect(warnings).toEqual([]);
+    expect(lead?.custom_data).toMatchObject({
+      budget: 1.75,
+      budget_raw: "₹1.5 Cr - ₹2.0 Cr",
+    });
+  });
+
+  it("omits budget_raw for plain single values", () => {
+    const { lead } = mapConnectedLeadRow({ Name: "X", Budget: "2.5 Cr" }, opts);
+    expect(lead?.custom_data).toMatchObject({ budget: 2.5 });
+    expect(lead?.custom_data).not.toHaveProperty("budget_raw");
   });
 
   it("splits multi-number phone cells into phone, alt, and extras", () => {
@@ -260,5 +317,152 @@ describe("mapConnectedInventoryRow", () => {
     expect(unit?.custom_data).toMatchObject({ owner_phone: "9811111111" });
     expect(note).toBe("Other phones: 9822222222");
     expect(warnings).toEqual(["Extra owner phone kept in remarks: 9822222222"]);
+  });
+});
+
+describe("resolveField", () => {
+  it("detects which side changed against the snapshot", () => {
+    expect(resolveField("a", "a", "a")).toBe("none");
+    expect(resolveField("a", "b", "a")).toBe("toApp");
+    expect(resolveField("a", "a", "b")).toBe("toSheet");
+    expect(resolveField("a", "b", "c")).toBe("conflict");
+    expect(resolveField(null, 1.75, null)).toBe("toApp");
+    expect(resolveField(1.75, 1.75, 2)).toBe("toSheet");
+  });
+});
+
+describe("isBlankCanon", () => {
+  it("treats null and empty string as blank", () => {
+    expect(isBlankCanon(null)).toBe(true);
+    expect(isBlankCanon("")).toBe(true);
+    expect(isBlankCanon("x")).toBe(false);
+    expect(isBlankCanon(0)).toBe(false);
+  });
+});
+
+describe("seedSheetSnapshot", () => {
+  const sheet: LeadCanonical = {
+    name: "Sheet Name",
+    phone: "9811111111",
+    email: "s@x.com",
+    stage: "New",
+    source: "Meta",
+    leadType: "Buyer",
+    project: "P",
+    budget: 1.75,
+    date: "2026-10-09",
+    lastCall: null,
+  };
+  const app: LeadCanonical = {
+    name: "App Name",
+    phone: "9822222222",
+    email: "a@x.com",
+    stage: "Qualified",
+    source: "Walk-in",
+    leadType: "",
+    project: "",
+    budget: null,
+    date: null,
+    lastCall: null,
+  };
+
+  it("seeds stage from the sheet and everything else from the app", () => {
+    expect(seedSheetSnapshot(sheet, app)).toEqual({ ...app, stage: "New" });
+  });
+
+  it("seeds a null stage from the app when uninitialized", () => {
+    const noStage = { ...app, stage: null };
+    expect(seedSheetSnapshot(sheet, noStage).stage).toBeNull();
+    expect(seedSheetSnapshot({ ...sheet, stage: null }, noStage).stage).toBeNull();
+  });
+});
+
+describe("readSnapshot", () => {
+  it("returns null for missing or malformed snapshots", () => {
+    expect(readSnapshot(null)).toBeNull();
+    expect(readSnapshot({})).toBeNull();
+    expect(readSnapshot({ sheet_snapshot: "nope" })).toBeNull();
+  });
+
+  it("reads a stored snapshot defensively", () => {
+    const snap = readSnapshot({
+      sheet_snapshot: { name: "X", budget: 2, stage: "New", extra: true },
+    });
+    expect(snap).toMatchObject({ name: "X", budget: 2, stage: "New" });
+    expect(snap?.phone).toBe("");
+    expect(snap?.date).toBeNull();
+  });
+});
+
+describe("canonical merge round-trip", () => {
+  const row = {
+    Date: "09/10/2026",
+    Name: "Rajesh Malhotra",
+    Phone: "+91 98765 43210, 9811111111",
+    Email: "Rajesh@Email.com",
+    Stage: "Qualified",
+    Source: "Walk-in",
+    "Lead Type": "Buyer",
+    "Project Interest": "Anand Prime Residences",
+    Budget: "₹1.5 Cr - ₹2.0 Cr",
+    "Last Date of Call": "08/10/2026",
+  };
+
+  it("reduces sheet and app sides to the same canonical form", () => {
+    const sheetCanon = canonicalFromSheetRow(row, stages);
+    expect(sheetCanon).toEqual({
+      name: "Rajesh Malhotra",
+      phone: "9876543210, 9811111111",
+      email: "rajesh@email.com",
+      stage: "Qualified",
+      source: "Walk-in",
+      leadType: "Buyer",
+      project: "Anand Prime Residences",
+      budget: 1.75,
+      date: "2026-10-09",
+      lastCall: "2026-10-08",
+    });
+    const appCanon = canonicalFromAppLead(
+      {
+        name: "Rajesh Malhotra",
+        phone: "9876543210",
+        alt_phone: "9811111111",
+        email: "rajesh@email.com",
+        source: "Walk-in",
+        stage_id: "s-qual",
+        project_interest: "Anand Prime Residences",
+        acquired_date: "2026-10-09",
+        custom_data: {
+          lead_type: "Buyer",
+          budget: 1.75,
+          budget_raw: "₹1.5 Cr - ₹2.0 Cr",
+          last_call_date: "2026-10-08",
+          additional_phones: [],
+        },
+      },
+      stages
+    );
+    expect(appCanon).toEqual(sheetCanon);
+  });
+
+  it("formats canonical values back to parse-stable sheet cells", () => {
+    const canon = canonicalFromSheetRow(row, stages);
+    const cells = formatCanonicalForSheet(canon);
+    expect(cells).toMatchObject({
+      Name: "Rajesh Malhotra",
+      Phone: "9876543210, 9811111111",
+      Email: "rajesh@email.com",
+      Stage: "Qualified",
+      Budget: "1.75 Cr",
+      Date: "2026-10-09",
+      "Last Date of Call": "2026-10-08",
+    });
+    // Formatting round-trips: re-parsing yields the same canonical form.
+    expect(canonicalFromSheetRow(cells, stages)).toEqual(canon);
+  });
+
+  it("maps unknown sheet stages to null so merges skip them", () => {
+    expect(canonicalFromSheetRow({ Stage: "Random" }, stages).stage).toBeNull();
+    expect(canonicalFromSheetRow({}, stages).stage).toBeNull();
   });
 });

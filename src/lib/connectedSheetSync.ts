@@ -5,23 +5,60 @@ import type { InventoryStatus, PipelineStage, Project } from "@/types";
 type LeadRowInsert = Database["public"]["Tables"]["leads"]["Insert"];
 type UnitRowInsert = Database["public"]["Tables"]["inventory"]["Insert"];
 import { createSupabaseAdmin } from "@/lib/supabase-admin";
-import { readSheetTab, updateLeadStatusColumn } from "@/lib/googleSheets";
+import {
+  appendSheetRows,
+  readSheetTab,
+  updateLeadStatusColumn,
+  writeSheetCells,
+  type SheetCellWrite,
+} from "@/lib/googleSheets";
 import {
   buildSheetTracking,
+  canonicalFromAppLead,
+  canonicalFromSheetRow,
   connectedInventoryTab,
   connectedLeadsTab,
+  formatCanonicalFieldForSheet,
+  formatCanonicalForSheet,
+  getSheetField,
+  isBlankCanon,
+  isRangedBudget,
+  LEAD_CANONICAL_FIELDS,
+  LEAD_FIELD_HEADERS,
+  LEAD_FIELD_LABELS,
+  LEAD_SHEET_HEADERS,
   mapConnectedInventoryRow,
   mapConnectedLeadRow,
+  readSnapshot,
+  resolveField,
+  seedSheetSnapshot,
+  type LeadCanonical,
+  type LeadCanonicalField,
 } from "@/lib/connectedSheetMapper";
+import { assignSplitPhones, splitPhoneCell } from "@/lib/phoneNumbers";
 import { normalizePhoneKey } from "@/lib/utils";
 
 export type ConnectedSheetTab = "leads" | "inventory";
+
+export interface LeadMergeStats {
+  /** Leads updated from sheet edits. */
+  appliedFromSheet: number;
+  /** Sheet rows written from app edits. */
+  writtenToSheet: number;
+  /** Rows skipped outside the sheet grid. */
+  skippedStale: number;
+  /** Fields changed on both sides (app value kept). */
+  conflicts: number;
+  /** App-created leads appended as new sheet rows. */
+  appended: number;
+}
 
 export interface TabSyncResult {
   created: number;
   repointed: number;
   warnings: string[];
   errors: string[];
+  merge?: LeadMergeStats;
 }
 
 export interface WriteBackResult {
@@ -146,8 +183,14 @@ function mergeTracking(existing: unknown, tracking: Record<string, unknown>) {
 
 interface ExistingLead {
   id: string;
+  name: string;
   phone: string | null;
+  alt_phone: string | null;
   email: string | null;
+  source: string | null;
+  stage_id: string | null;
+  project_interest: string | null;
+  acquired_date: string | null;
   custom_data: unknown;
 }
 
@@ -163,6 +206,78 @@ interface RepointUpdate {
   id: string;
   sheetRow: number;
   customData: Record<string, unknown>;
+  /** Lead-column changes merged from the sheet (in addition to custom_data). */
+  patch?: Partial<LeadRowInsert>;
+}
+
+/**
+ * Apply one sheet-side canonical value to the app record. Returns false when
+ * the value cannot be applied (unknown stage label), leaving the app record
+ * and snapshot untouched.
+ */
+export function applySheetFieldToPatch(
+  field: LeadCanonicalField,
+  sheet: LeadCanonical,
+  rawRow: Record<string, string>,
+  appPhone: string,
+  patch: Partial<LeadRowInsert>,
+  merged: Record<string, unknown>,
+  stages: PipelineStage[]
+): boolean {
+  const value = sheet[field];
+  switch (field) {
+    case "name":
+      patch.name = value as string;
+      return true;
+    case "phone": {
+      // Union sheet numbers with app-only numbers so manual additions in the
+      // app survive a sheet-side phone edit.
+      const appParts = appPhone.split(",").map((p) => p.trim()).filter(Boolean);
+      const numbers = splitPhoneCell(getSheetField(rawRow, "Phone")).numbers;
+      for (const part of appParts) {
+        if (!numbers.includes(part)) numbers.push(part);
+      }
+      const assigned = assignSplitPhones(numbers.join(", "));
+      patch.phone = assigned.primary;
+      patch.alt_phone = assigned.alt;
+      if (assigned.extras.length > 0) merged.additional_phones = assigned.extras;
+      else delete merged.additional_phones;
+      return true;
+    }
+    case "email":
+      patch.email = value as string;
+      return true;
+    case "stage": {
+      const stage = stages.find(
+        (s) => s.label.toLowerCase() === String(value).toLowerCase()
+      );
+      if (!stage) return false;
+      patch.stage_id = stage.id;
+      return true;
+    }
+    case "source":
+      patch.source = value as string;
+      return true;
+    case "leadType":
+      merged.lead_type = value;
+      return true;
+    case "project":
+      patch.project_interest = value as string;
+      return true;
+    case "budget": {
+      merged.budget = value;
+      const rawBudget = getSheetField(rawRow, "Budget");
+      if (rawBudget && isRangedBudget(rawBudget)) merged.budget_raw = rawBudget;
+      else delete merged.budget_raw;
+      return true;
+    }
+    case "date":
+      patch.acquired_date = value as string;
+      return true;
+    case "lastCall":
+      merged.last_call_date = value;
+      return true;
+  }
 }
 
 interface ExistingUnit {
@@ -194,11 +309,28 @@ export async function syncLeadsFromSheet(): Promise<TabSyncResult> {
   const [{ data: stages, error: stagesError }, { data: existing, error: existingError }, rows] =
     await Promise.all([
       supabase.from("pipeline_stages").select("id, label, color, sort_order").order("sort_order"),
-      supabase.from("leads").select("id, phone, email, custom_data"),
+      supabase
+        .from("leads")
+        .select(
+          "id, name, phone, alt_phone, email, source, stage_id, project_interest, acquired_date, custom_data"
+        ),
       readSheetTab(tab),
     ]);
   if (stagesError) throw stagesError;
   if (existingError) throw existingError;
+
+  const stagesList = (stages ?? []) as PipelineStage[];
+  const nowIso = new Date().toISOString();
+  const merge: LeadMergeStats = {
+    appliedFromSheet: 0,
+    writtenToSheet: 0,
+    skippedStale: 0,
+    conflicts: 0,
+    appended: 0,
+  };
+  const cells: SheetCellWrite[] = [];
+  const appliedLeadIds = new Set<string>();
+  const repointedIds = new Set<string>();
 
   const byPhone = new Map<string, ExistingLead>();
   const byEmail = new Map<string, ExistingLead>();
@@ -218,7 +350,7 @@ export async function syncLeadsFromSheet(): Promise<TabSyncResult> {
       sheetRow,
       sheetId,
       sheetTab: tab,
-      stages: (stages ?? []) as PipelineStage[],
+      stages: stagesList,
     });
     if (!mapped.lead) {
       result.errors.push(`${tab} row ${sheetRow}: ${mapped.error}`);
@@ -244,15 +376,40 @@ export async function syncLeadsFromSheet(): Promise<TabSyncResult> {
       // Client-generated id so later rows can match this lead (and its
       // notes can reference it) before the chunk is flushed.
       const id = randomUUID();
+      const customData = {
+        ...((mapped.lead.custom_data ?? {}) as Record<string, unknown>),
+      };
       const lead: LeadRowInsert = {
         ...mapped.lead,
         id,
-        custom_data: (mapped.lead.custom_data ?? {}) as Json,
+        custom_data: customData as Json,
       };
+      // New leads start fully synced: snapshot equals the imported values.
+      customData.sheet_snapshot = canonicalFromAppLead(
+        {
+          name: lead.name,
+          phone: lead.phone ?? null,
+          alt_phone: lead.alt_phone ?? null,
+          email: lead.email ?? null,
+          source: lead.source ?? null,
+          stage_id: lead.stage_id ?? null,
+          project_interest: lead.project_interest ?? null,
+          acquired_date: lead.acquired_date ?? null,
+          custom_data: customData,
+        },
+        stagesList
+      );
+      customData.sheet_snapshot_at = nowIso;
       const ref: ExistingLead = {
         id,
+        name: lead.name,
         phone: lead.phone ?? null,
+        alt_phone: lead.alt_phone ?? null,
         email: lead.email ?? null,
+        source: lead.source ?? null,
+        stage_id: lead.stage_id ?? null,
+        project_interest: lead.project_interest ?? null,
+        acquired_date: lead.acquired_date ?? null,
         custom_data: lead.custom_data,
       };
       pending.set(id, { id, sheetRow, lead, note: mapped.note, ref });
@@ -262,22 +419,89 @@ export async function syncLeadsFromSheet(): Promise<TabSyncResult> {
       continue;
     }
 
-    // Re-point row tracking only; never overwrite CRM edits from the sheet.
+    // Re-point row tracking, then three-way merge the row against the app
+    // record using the last-synced snapshot.
     const merged = mergeTracking(match.custom_data, buildSheetTracking(sheetId, tab, sheetRow));
     const unflushed = pending.get(match.id);
     if (unflushed) {
       unflushed.lead.custom_data = merged as Json;
       unflushed.ref.custom_data = merged;
       result.repointed++;
-    } else {
-      repoints.push({ id: match.id, sheetRow, customData: merged });
+      continue;
     }
+    repointedIds.add(match.id);
+
+    const sheetCanon = canonicalFromSheetRow(row, stagesList);
+    const appCanon = canonicalFromAppLead(match, stagesList);
+    const stored = readSnapshot(match.custom_data);
+    const seeded = !stored;
+    const snapshot = stored ?? seedSheetSnapshot(sheetCanon, appCanon);
+    const nextSnap: LeadCanonical = { ...snapshot };
+    const patch: Partial<LeadRowInsert> = {};
+    let patched = false;
+    let cellsForLead = 0;
+
+    for (const field of LEAD_CANONICAL_FIELDS) {
+      const action = resolveField(snapshot[field], sheetCanon[field], appCanon[field]);
+      if (action === "none") continue;
+      if (action === "toApp") {
+        // Blank sheet cells never wipe app values; unappliable values
+        // (unknown stage labels) leave the record and snapshot untouched.
+        if (isBlankCanon(sheetCanon[field])) continue;
+        const applied = applySheetFieldToPatch(
+          field,
+          sheetCanon,
+          row,
+          appCanon.phone,
+          patch,
+          merged,
+          stagesList
+        );
+        if (!applied) continue;
+        patched = true;
+        appliedLeadIds.add(match.id);
+        nextSnap[field] = sheetCanon[field] as never;
+        if (seeded) {
+          result.warnings.push(
+            `${tab} row ${sheetRow}: ${LEAD_FIELD_LABELS[field]} set from sheet ` +
+              `("${appCanon[field] ?? ""}" → "${sheetCanon[field] ?? ""}")`
+          );
+        }
+        continue;
+      }
+      // toSheet or conflict: an uninitialized app stage never wipes the sheet.
+      if (field === "stage" && appCanon.stage == null) continue;
+      cells.push({
+        row: sheetRow,
+        header: LEAD_FIELD_HEADERS[field],
+        value: formatCanonicalFieldForSheet(field, appCanon),
+      });
+      cellsForLead++;
+      if (field === "budget") delete merged.budget_raw;
+      nextSnap[field] = appCanon[field] as never;
+      if (action === "conflict") {
+        merge.conflicts++;
+        result.warnings.push(
+          `${tab} row ${sheetRow}: ${LEAD_FIELD_LABELS[field]} changed on both sides, kept app value`
+        );
+      }
+    }
+    if (cellsForLead > 0 || patched || seeded) {
+      merged.sheet_snapshot = nextSnap;
+      merged.sheet_snapshot_at = nowIso;
+    }
+    repoints.push({
+      id: match.id,
+      sheetRow,
+      customData: merged,
+      patch: patched ? patch : undefined,
+    });
   }
 
   await mapWithConcurrency(repoints, WRITE_CONCURRENCY, async (repoint) => {
     const { error } = await supabase
       .from("leads")
-      .update({ custom_data: repoint.customData as Json })
+      .update({ ...repoint.patch, custom_data: repoint.customData as Json })
       .eq("id", repoint.id);
     if (error) {
       result.errors.push(`${tab} row ${repoint.sheetRow}: ${error.message}`);
@@ -310,7 +534,85 @@ export async function syncLeadsFromSheet(): Promise<TabSyncResult> {
     await supabase.from("lead_notes").insert(notes);
   }
 
+  merge.appliedFromSheet = appliedLeadIds.size;
+
+  try {
+    const written = await writeSheetCells(tab, cells);
+    merge.writtenToSheet = written.writtenRows;
+    merge.skippedStale = written.skippedRows.length;
+    if (written.skippedRows.length > 0) {
+      result.warnings.push(
+        `Skipped write-back for ${written.skippedRows.length} row(s) deleted from the sheet`
+      );
+    }
+  } catch (err) {
+    result.errors.push(
+      `Write-back failed: ${err instanceof Error ? err.message : "unknown error"}`
+    );
+  }
+
+  try {
+    merge.appended = await appendUntrackedLeads(
+      supabase,
+      sheetId,
+      tab,
+      (existing ?? []) as ExistingLead[],
+      repointedIds,
+      stagesList
+    );
+  } catch (err) {
+    result.errors.push(
+      `Sheet append failed: ${err instanceof Error ? err.message : "unknown error"}`
+    );
+  }
+
+  result.merge = merge;
   return result;
+}
+
+/**
+ * Append app-created leads (never tracked to any sheet row) to the bottom of
+ * the tab, then record their tracking + snapshot so the next sync merges
+ * instead of duplicating. Leads already matched to a sheet row this run are
+ * excluded via repointedIds.
+ */
+async function appendUntrackedLeads(
+  supabase: ReturnType<typeof createSupabaseAdmin>,
+  sheetId: string,
+  tab: string,
+  existing: ExistingLead[],
+  repointedIds: Set<string>,
+  stages: PipelineStage[]
+): Promise<number> {
+  const candidates = existing.filter((lead) => {
+    const tracking = lead.custom_data as Record<string, unknown> | null;
+    return tracking?.sheet_id == null && !repointedIds.has(lead.id);
+  });
+  if (candidates.length === 0) return 0;
+
+  const rows = candidates.map((lead) => {
+    const cells = formatCanonicalForSheet(canonicalFromAppLead(lead, stages));
+    const raw = (lead.custom_data as Record<string, unknown> | null)?.budget_raw;
+    if (typeof raw === "string" && raw) cells.Budget = raw;
+    return LEAD_SHEET_HEADERS.map((header) => cells[header] ?? "");
+  });
+  const { startRow } = await appendSheetRows(tab, rows);
+
+  const syncedAt = new Date().toISOString();
+  await mapWithConcurrency(candidates, WRITE_CONCURRENCY, async (lead, index) => {
+    const custom = mergeTracking(
+      lead.custom_data,
+      buildSheetTracking(sheetId, tab, startRow + index)
+    );
+    custom.sheet_snapshot = canonicalFromAppLead(lead, stages);
+    custom.sheet_snapshot_at = syncedAt;
+    const { error } = await supabase
+      .from("leads")
+      .update({ custom_data: custom as Json })
+      .eq("id", lead.id);
+    if (error) throw new Error(error.message);
+  });
+  return candidates.length;
 }
 
 export async function syncInventoryFromSheet(): Promise<TabSyncResult> {
@@ -424,63 +726,10 @@ export async function syncInventoryFromSheet(): Promise<TabSyncResult> {
   return result;
 }
 
-interface TrackedLead {
-  id: string;
-  custom_data: Record<string, unknown> | null;
-  pipeline_stages: { label: string } | null;
-}
-
 interface TrackedUnit {
   id: string;
   status: InventoryStatus;
   custom_data: Record<string, unknown> | null;
-}
-
-async function writeBackLeadStages(): Promise<WriteBackResult> {
-  const sheetId = process.env.GOOGLE_SHEET_ID ?? "";
-  const tab = connectedLeadsTab();
-  const supabase = createSupabaseAdmin();
-
-  const { data: leads, error } = await supabase
-    .from("leads")
-    .select("id, custom_data, pipeline_stages(label)")
-    .filter("custom_data->>imported_from_sheet", "eq", "true")
-    .filter("custom_data->>sheet_id", "eq", sheetId)
-    .filter("custom_data->>sheet_tab", "eq", tab);
-  if (error) throw error;
-
-  const updates: { row: number; status: string; leadId: string }[] = [];
-  let skipped = 0;
-  for (const lead of (leads ?? []) as TrackedLead[]) {
-    const customData = lead.custom_data ?? {};
-    const sheetRow = customData.sheet_row;
-    const stageLabel = lead.pipeline_stages?.label;
-    if (typeof sheetRow !== "number" || !stageLabel) {
-      skipped++;
-      continue;
-    }
-    updates.push({ row: sheetRow, status: stageLabel, leadId: lead.id });
-  }
-
-  if (updates.length > 0) {
-    const { updated, skippedRows } = await updateLeadStatusColumn(
-      updates.map(({ row, status }) => ({ row, status })),
-      { sheetName: tab, statusColumn: "Stage" }
-    );
-    const skippedSet = new Set(skippedRows);
-    const written = updates.filter((update) => !skippedSet.has(update.row));
-    const syncedAt = new Date().toISOString();
-    await mapWithConcurrency(written, WRITE_CONCURRENCY, async ({ leadId }) => {
-      const lead = (leads as TrackedLead[]).find((l) => l.id === leadId);
-      await supabase
-        .from("leads")
-        .update({ custom_data: { ...(lead?.custom_data ?? {}), sheet_status_synced_at: syncedAt } as Json })
-        .eq("id", leadId);
-    });
-    return { synced: updated, skipped: skipped + skippedRows.length, staleSkipped: skippedRows.length };
-  }
-
-  return { synced: 0, skipped, staleSkipped: 0 };
 }
 
 async function writeBackInventoryStatuses(): Promise<WriteBackResult> {
@@ -543,20 +792,16 @@ export async function runConnectedSheetSync(
   if (tabs.includes("leads")) {
     try {
       result.leads = await syncLeadsFromSheet();
+      // The leads merge writes app edits to the sheet inline (replacing the
+      // old stage-only write-back), so stats come straight from the merge.
+      const merge = result.leads.merge;
+      result.writeBack.leads = {
+        synced: merge?.writtenToSheet ?? 0,
+        skipped: 0,
+        staleSkipped: merge?.skippedStale ?? 0,
+      };
     } catch (err) {
       result.leads.errors.push(err instanceof Error ? err.message : "Leads sync failed");
-    }
-    try {
-      result.writeBack.leads = await writeBackLeadStages();
-      if (result.writeBack.leads.staleSkipped > 0) {
-        result.leads.warnings.push(
-          `Skipped write-back for ${result.writeBack.leads.staleSkipped} row(s) deleted from the sheet`
-        );
-      }
-    } catch (err) {
-      result.leads.errors.push(
-        `Write-back failed: ${err instanceof Error ? err.message : "unknown error"}`
-      );
     }
   }
 
