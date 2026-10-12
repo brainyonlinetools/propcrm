@@ -27,6 +27,8 @@ export interface TabSyncResult {
 export interface WriteBackResult {
   synced: number;
   skipped: number;
+  /** Rows skipped because the tracked sheet row no longer exists (deleted). */
+  staleSkipped: number;
 }
 
 export interface ConnectedSheetSyncResult {
@@ -461,21 +463,24 @@ async function writeBackLeadStages(): Promise<WriteBackResult> {
   }
 
   if (updates.length > 0) {
-    await updateLeadStatusColumn(
+    const { updated, skippedRows } = await updateLeadStatusColumn(
       updates.map(({ row, status }) => ({ row, status })),
       { sheetName: tab, statusColumn: "Stage" }
     );
+    const skippedSet = new Set(skippedRows);
+    const written = updates.filter((update) => !skippedSet.has(update.row));
     const syncedAt = new Date().toISOString();
-    await mapWithConcurrency(updates, WRITE_CONCURRENCY, async ({ leadId }) => {
+    await mapWithConcurrency(written, WRITE_CONCURRENCY, async ({ leadId }) => {
       const lead = (leads as TrackedLead[]).find((l) => l.id === leadId);
       await supabase
         .from("leads")
         .update({ custom_data: { ...(lead?.custom_data ?? {}), sheet_status_synced_at: syncedAt } as Json })
         .eq("id", leadId);
     });
+    return { synced: updated, skipped: skipped + skippedRows.length, staleSkipped: skippedRows.length };
   }
 
-  return { synced: updates.length, skipped };
+  return { synced: 0, skipped, staleSkipped: 0 };
 }
 
 async function writeBackInventoryStatuses(): Promise<WriteBackResult> {
@@ -503,21 +508,24 @@ async function writeBackInventoryStatuses(): Promise<WriteBackResult> {
   }
 
   if (updates.length > 0) {
-    await updateLeadStatusColumn(
+    const { updated, skippedRows } = await updateLeadStatusColumn(
       updates.map(({ row, status }) => ({ row, status })),
       { sheetName: tab, statusColumn: "Status" }
     );
+    const skippedSet = new Set(skippedRows);
+    const written = updates.filter((update) => !skippedSet.has(update.row));
     const syncedAt = new Date().toISOString();
-    await mapWithConcurrency(updates, WRITE_CONCURRENCY, async ({ unitId }) => {
+    await mapWithConcurrency(written, WRITE_CONCURRENCY, async ({ unitId }) => {
       const unit = (units as TrackedUnit[]).find((u) => u.id === unitId);
       await supabase
         .from("inventory")
         .update({ custom_data: { ...(unit?.custom_data ?? {}), sheet_status_synced_at: syncedAt } as Json })
         .eq("id", unitId);
     });
+    return { synced: updated, skipped: skipped + skippedRows.length, staleSkipped: skippedRows.length };
   }
 
-  return { synced: updates.length, skipped };
+  return { synced: 0, skipped, staleSkipped: 0 };
 }
 
 export async function runConnectedSheetSync(
@@ -526,7 +534,10 @@ export async function runConnectedSheetSync(
   const result: ConnectedSheetSyncResult = {
     leads: emptyTabResult(),
     inventory: emptyTabResult(),
-    writeBack: { leads: { synced: 0, skipped: 0 }, inventory: { synced: 0, skipped: 0 } },
+    writeBack: {
+      leads: { synced: 0, skipped: 0, staleSkipped: 0 },
+      inventory: { synced: 0, skipped: 0, staleSkipped: 0 },
+    },
   };
 
   if (tabs.includes("leads")) {
@@ -537,6 +548,11 @@ export async function runConnectedSheetSync(
     }
     try {
       result.writeBack.leads = await writeBackLeadStages();
+      if (result.writeBack.leads.staleSkipped > 0) {
+        result.leads.warnings.push(
+          `Skipped write-back for ${result.writeBack.leads.staleSkipped} row(s) deleted from the sheet`
+        );
+      }
     } catch (err) {
       result.leads.errors.push(
         `Write-back failed: ${err instanceof Error ? err.message : "unknown error"}`
@@ -552,6 +568,11 @@ export async function runConnectedSheetSync(
     }
     try {
       result.writeBack.inventory = await writeBackInventoryStatuses();
+      if (result.writeBack.inventory.staleSkipped > 0) {
+        result.inventory.warnings.push(
+          `Skipped write-back for ${result.writeBack.inventory.staleSkipped} row(s) deleted from the sheet`
+        );
+      }
     } catch (err) {
       result.inventory.errors.push(
         `Write-back failed: ${err instanceof Error ? err.message : "unknown error"}`

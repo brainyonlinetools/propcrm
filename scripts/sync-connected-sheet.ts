@@ -50,7 +50,7 @@ async function main() {
   for (const tab of tabs) {
     const r = result[tab];
     const wb = result.writeBack[tab];
-    console.log(`\n[${tab}] created=${r.created} repointed=${r.repointed} writtenBack=${wb.synced} skipped=${wb.skipped}`);
+    console.log(`\n[${tab}] created=${r.created} repointed=${r.repointed} writtenBack=${wb.synced} skipped=${wb.skipped} stale=${wb.staleSkipped}`);
     for (const w of r.warnings.slice(0, 10)) console.log(`  WARN: ${w}`);
     for (const e of r.errors.slice(0, 10)) console.log(`  ERROR: ${e}`);
   }

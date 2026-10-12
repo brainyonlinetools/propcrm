@@ -42,6 +42,13 @@ export function describeSheetsError(err: unknown, context: SheetsErrorContext): 
     .map(Number)
     .filter((n) => Number.isFinite(n));
   const message = err instanceof Error ? err.message : String(err);
+  if (/exceeds grid limits/i.test(message)) {
+    return (
+      `Cannot write to tab "${context.tab}": a tracked sheet row no longer exists ` +
+      `in the sheet (it was deleted and the sheet shrank). Re-run sync so the ` +
+      `surviving rows are re-matched, then update again.`
+    );
+  }
   if (codes.includes(404) || /requested entity was not found/i.test(message)) {
     return (
       `Cannot open the connected spreadsheet (tab "${context.tab}"): ` +
@@ -97,11 +104,83 @@ export async function getColumnIndexByHeader(
   return index;
 }
 
+export interface SheetGridLimits {
+  rowCount: number;
+  columnCount: number;
+}
+
+export interface StatusWriteResult {
+  updated: number;
+  skippedRows: number[];
+}
+
+/** Ranges per values.batchUpdate call; keeps payloads small and failures contained. */
+const WRITE_CHUNK_SIZE = 500;
+
+/** Current grid dimensions of one tab (row/column counts shrink when rows are deleted). */
+export async function getSheetGridLimits(
+  sheetId: string,
+  sheetName: string
+): Promise<SheetGridLimits> {
+  const sheets = getSheetsClient();
+  let response;
+  try {
+    response = await sheets.spreadsheets.get({
+      spreadsheetId: sheetId,
+      fields: "sheets.properties.title,sheets.properties.gridProperties",
+    });
+  } catch (err) {
+    throw new Error(describeSheetsError(err, { tab: sheetName }));
+  }
+  const match = (response.data.sheets ?? []).find(
+    (entry) => entry.properties?.title === sheetName
+  );
+  const grid = match?.properties?.gridProperties;
+  if (!grid?.rowCount || !grid?.columnCount) {
+    throw new Error(
+      `Tab "${sheetName}" was not found in the connected spreadsheet. ` +
+        `Check GOOGLE_SHEET_LEADS_TAB and GOOGLE_SHEET_INVENTORY_TAB.`
+    );
+  }
+  return { rowCount: grid.rowCount, columnCount: grid.columnCount };
+}
+
+/**
+ * Split status writes into rows inside the current grid and rows to skip.
+ * Tracked rows go stale when sheet rows are deleted (the grid shrinks), and
+ * one out-of-range cell rejects the whole batchUpdate — so stale rows are
+ * skipped up front instead of failing every other write. Row 1 is the header
+ * and is never written.
+ */
+export function partitionInBoundsUpdates(
+  updates: LeadStatusUpdate[],
+  columnIndex: number,
+  limits: SheetGridLimits
+): { inBounds: LeadStatusUpdate[]; skippedRows: number[] } {
+  const inBounds: LeadStatusUpdate[] = [];
+  const skippedRows: number[] = [];
+  const columnOk =
+    Number.isInteger(columnIndex) && columnIndex >= 0 && columnIndex < limits.columnCount;
+  for (const update of updates) {
+    if (
+      !columnOk ||
+      !Number.isInteger(update.row) ||
+      update.row < 2 ||
+      update.row > limits.rowCount
+    ) {
+      skippedRows.push(update.row);
+    } else {
+      inBounds.push(update);
+    }
+  }
+  return { inBounds, skippedRows };
+}
+
 export async function updateLeadStatusColumn(
   updates: LeadStatusUpdate[],
   options?: { sheetName?: string; statusColumn?: string }
-): Promise<void> {
-  if (updates.length === 0) return;
+): Promise<StatusWriteResult> {
+  if (updates.length === 0) return { updated: 0, skippedRows: [] };
 
   const sheetId = process.env.GOOGLE_SHEET_ID;
   if (!sheetId) {
@@ -111,26 +190,36 @@ export async function updateLeadStatusColumn(
   const sheetName = options?.sheetName ?? process.env.GOOGLE_SHEET_NAME ?? "Sheet1";
   const statusColumn = options?.statusColumn ?? process.env.GOOGLE_SHEET_STATUS_COLUMN ?? "lead_status";
 
-  const columnIndex = await getColumnIndexByHeader(sheetId, sheetName, statusColumn);
+  const [columnIndex, limits] = await Promise.all([
+    getColumnIndexByHeader(sheetId, sheetName, statusColumn),
+    getSheetGridLimits(sheetId, sheetName),
+  ]);
+  const { inBounds, skippedRows } = partitionInBoundsUpdates(updates, columnIndex, limits);
+  if (inBounds.length === 0) return { updated: 0, skippedRows };
+
   const columnLetter = columnIndexToLetter(columnIndex);
   const sheets = getSheetsClient();
 
-  const data = updates.map(({ row, status }) => ({
-    range: `${sheetName}!${columnLetter}${row}`,
-    values: [[status]],
-  }));
+  for (let i = 0; i < inBounds.length; i += WRITE_CHUNK_SIZE) {
+    const data = inBounds.slice(i, i + WRITE_CHUNK_SIZE).map(({ row, status }) => ({
+      range: `${sheetName}!${columnLetter}${row}`,
+      values: [[status]],
+    }));
 
-  try {
-    await sheets.spreadsheets.values.batchUpdate({
-      spreadsheetId: sheetId,
-      requestBody: {
-        valueInputOption: "RAW",
-        data,
-      },
-    });
-  } catch (err) {
-    throw new Error(describeSheetsError(err, { tab: sheetName }));
+    try {
+      await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId: sheetId,
+        requestBody: {
+          valueInputOption: "RAW",
+          data,
+        },
+      });
+    } catch (err) {
+      throw new Error(describeSheetsError(err, { tab: sheetName }));
+    }
   }
+
+  return { updated: inBounds.length, skippedRows };
 }
 
 export interface SheetLeadRow {

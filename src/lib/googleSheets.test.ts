@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { describeSheetsError, sheetRowMatchesIdentity } from "./googleSheets";
+import {
+  describeSheetsError,
+  partitionInBoundsUpdates,
+  sheetRowMatchesIdentity,
+} from "./googleSheets";
 
 function gaxiosLike(message: string, code: unknown, status: unknown): Error {
   return Object.assign(new Error(message), { code, status });
@@ -30,6 +34,71 @@ describe("describeSheetsError", () => {
 
   it("passes unrelated errors through untouched", () => {
     expect(describeSheetsError(new Error("boom"), { tab: "Leads" })).toBe("boom");
+  });
+
+  it("translates a grid-limits write into an actionable stale-row error", () => {
+    const err = gaxiosLike(
+      "Invalid data[404]: Range (Leads!E1578) exceeds grid limits. Max rows: 1577, max columns: 26",
+      404,
+      404
+    );
+    const message = describeSheetsError(err, { tab: "Leads" });
+    expect(message).toContain('tab "Leads"');
+    expect(message).toContain("no longer exists");
+    expect(message).not.toContain("exceeds grid limits");
+  });
+});
+
+describe("partitionInBoundsUpdates", () => {
+  const limits = { rowCount: 1577, columnCount: 26 };
+
+  it("keeps rows inside the grid", () => {
+    const updates = [
+      { row: 2, status: "New" },
+      { row: 1577, status: "Contacted" },
+    ];
+    expect(partitionInBoundsUpdates(updates, 4, limits)).toEqual({
+      inBounds: updates,
+      skippedRows: [],
+    });
+  });
+
+  it("skips rows past the grid so one deleted row cannot fail the batch", () => {
+    const { inBounds, skippedRows } = partitionInBoundsUpdates(
+      [
+        { row: 2, status: "New" },
+        { row: 1578, status: "Contacted" },
+      ],
+      4,
+      limits
+    );
+    expect(inBounds).toEqual([{ row: 2, status: "New" }]);
+    expect(skippedRows).toEqual([1578]);
+  });
+
+  it("skips the header row and invalid rows instead of corrupting them", () => {
+    const { inBounds, skippedRows } = partitionInBoundsUpdates(
+      [
+        { row: 1, status: "New" },
+        { row: 0, status: "New" },
+        { row: 2.5, status: "New" },
+        { row: 10, status: "New" },
+      ],
+      4,
+      limits
+    );
+    expect(inBounds).toEqual([{ row: 10, status: "New" }]);
+    expect(skippedRows).toEqual([1, 0, 2.5]);
+  });
+
+  it("skips everything when the status column itself is outside the grid", () => {
+    const { inBounds, skippedRows } = partitionInBoundsUpdates(
+      [{ row: 2, status: "New" }],
+      26,
+      limits
+    );
+    expect(inBounds).toEqual([]);
+    expect(skippedRows).toEqual([2]);
   });
 });
 
