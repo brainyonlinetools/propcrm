@@ -43,3 +43,6 @@ next-env.d.ts
 public/sw.js
 public/swe-worker-*.js
 
+
+# Supabase CLI local link state
+supabase/.temp/
