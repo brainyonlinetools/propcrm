@@ -3,8 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
-import { Plus, RefreshCw, Search, Upload, X, ChevronDown } from "lucide-react";
+import { Plus, Search, Upload, X, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -25,7 +24,6 @@ import {
 } from "@/components/shared/ViewModeToggle";
 import { useIsDesktop } from "@/hooks/useIsDesktop";
 import { inventoryKey, useInventory } from "@/lib/queries/inventory";
-import { describeTabSync, triggerSheetSync } from "@/lib/sheetSyncClient";
 import { cn, formatCurrency } from "@/lib/utils";
 import type { InventoryStatus } from "@/types";
 
@@ -43,7 +41,6 @@ export function InventoryBrowser() {
   const [importOpen, setImportOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [syncing, setSyncing] = useState(false);
   const queryClient = useQueryClient();
 
   const { data: units = [], isLoading, isError } = useInventory();
@@ -107,30 +104,6 @@ export function InventoryBrowser() {
     await queryClient.invalidateQueries({ queryKey: inventoryKey });
   }
 
-  async function handleSyncNow() {
-    if (syncing) return;
-    setSyncing(true);
-    try {
-      const result = await triggerSheetSync(["inventory"]);
-      if (result.error || !result.inventory) {
-        toast.error(result.error ?? "Sheet sync failed");
-        return;
-      }
-      await queryClient.invalidateQueries({ queryKey: inventoryKey });
-      toast.success(describeTabSync("Sheet sync", result.inventory));
-      for (const warning of result.inventory.warnings.slice(0, 2)) {
-        toast.warning(warning);
-      }
-      for (const error of result.inventory.errors.slice(0, 2)) {
-        toast.error(error);
-      }
-    } catch {
-      toast.error("Sheet sync failed");
-    } finally {
-      setSyncing(false);
-    }
-  }
-
   const listHeader = (
     <header className="sticky top-0 z-40 shrink-0 border-b border-border bg-background/95 px-4 py-3 backdrop-blur-sm">
       <div className="flex items-center justify-between gap-2">
@@ -144,15 +117,6 @@ export function InventoryBrowser() {
             aria-label="Bulk import inventory"
           >
             <Upload />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleSyncNow}
-            disabled={syncing}
-            aria-label="Sync now with Google Sheet"
-          >
-            <RefreshCw className={cn(syncing && "animate-spin")} />
           </Button>
         </div>
       </div>

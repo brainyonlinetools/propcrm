@@ -266,8 +266,6 @@ export function useUpdateInventory() {
 
 export interface DeleteInventoryResult {
   id: string;
-  warning?: string;
-  sheetCleared?: boolean;
 }
 
 export function useDeleteInventory() {

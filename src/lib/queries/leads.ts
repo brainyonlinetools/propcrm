@@ -267,9 +267,22 @@ export function useBulkUpdateLeadStage() {
   });
 }
 
+export function useBulkDeleteLeads() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (ids: string[]) => {
+      const { error } = await supabase.from("leads").delete().in("id", ids);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: leadsKey });
+      queryClient.invalidateQueries({ queryKey: qualifiedLeadsKey });
+    },
+  });
+}
+
 export interface DeleteLeadResult {
-  warning?: string;
-  sheetCleared?: boolean;
+  deleted?: boolean;
 }
 
 export function useDeleteLead() {

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CheckSquare, LayoutGrid, List, PhoneCall, Plus, RefreshCw, Search, Upload, X, ChevronDown } from "lucide-react";
+import { CheckSquare, LayoutGrid, List, PhoneCall, Plus, Search, Trash2, Upload, X, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -11,6 +11,16 @@ import { LeadCard } from "@/components/leads/LeadCard";
 import { LeadDetailPanel } from "@/components/leads/LeadDetailPanel";
 import { LeadKanban } from "@/components/leads/LeadKanban";
 import { LeadForm } from "@/components/leads/LeadForm";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { BatchStageChangeSheet } from "@/components/leads/BatchStageChangeSheet";
 import { BatchWhatsAppSheet } from "@/components/leads/BatchWhatsAppSheet";
 import { BulkImportSheet } from "@/components/shared/BulkImportSheet";
@@ -25,10 +35,9 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PullToRefresh } from "@/components/shared/PullToRefresh";
 import { CallQueueSheet, type CallQueueContact } from "@/components/shared/CallQueueSheet";
 import { useIsDesktop } from "@/hooks/useIsDesktop";
-import { leadsKey, useLeads } from "@/lib/queries/leads";
+import { leadsKey, useBulkDeleteLeads, useLeads } from "@/lib/queries/leads";
 import { usePipelineStages } from "@/lib/queries/pipelineStages";
 import { useCreateLeadNote, useCreateTask } from "@/lib/queries/tasks";
-import { describeTabSync, triggerSheetSync } from "@/lib/sheetSyncClient";
 import { cn, formatDisplayDate, formatPhone, formatRelativeDate } from "@/lib/utils";
 import {
   CALL_OUTCOME_LABELS,
@@ -58,9 +67,10 @@ export default function LeadsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [batchOpen, setBatchOpen] = useState(false);
   const [stageChangeOpen, setStageChangeOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const bulkDelete = useBulkDeleteLeads();
   const [callQueueOpen, setCallQueueOpen] = useState(false);
   const [callQueue, setCallQueue] = useState<CallQueueContact[]>([]);
-  const [syncing, setSyncing] = useState(false);
   const queryClient = useQueryClient();
   const createLeadNote = useCreateLeadNote();
   const createTask = useCreateTask();
@@ -195,33 +205,22 @@ export default function LeadsPage() {
     [filtered, selectedIds]
   );
 
+  async function handleBulkDelete() {
+    const ids = selectedLeads.map((lead) => lead.id);
+    if (ids.length === 0) return;
+    try {
+      await bulkDelete.mutateAsync(ids);
+      toast.success(`Deleted ${ids.length} lead${ids.length === 1 ? "" : "s"}`);
+      setDeleteOpen(false);
+      handleBatchComplete();
+    } catch {
+      toast.error("Failed to delete leads");
+    }
+  }
+
   function handleBatchComplete() {
     setSelectionMode(false);
     setSelectedIds(new Set());
-  }
-
-  async function handleSyncNow() {
-    if (syncing) return;
-    setSyncing(true);
-    try {
-      const result = await triggerSheetSync(["leads"]);
-      if (result.error || !result.leads) {
-        toast.error(result.error ?? "Sheet sync failed");
-        return;
-      }
-      await queryClient.invalidateQueries({ queryKey: leadsKey });
-      toast.success(describeTabSync("Sheet sync", result.leads));
-      for (const warning of result.leads.warnings.slice(0, 2)) {
-        toast.warning(warning);
-      }
-      for (const error of result.leads.errors.slice(0, 2)) {
-        toast.error(error);
-      }
-    } catch {
-      toast.error("Sheet sync failed");
-    } finally {
-      setSyncing(false);
-    }
   }
 
   function startCalling() {
@@ -315,15 +314,6 @@ export default function LeadsPage() {
             aria-label="Bulk import leads"
           >
             <Upload />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleSyncNow}
-            disabled={syncing}
-            aria-label="Sync now with Google Sheet"
-          >
-            <RefreshCw className={cn(syncing && "animate-spin")} />
           </Button>
           <Button
             variant="ghost"
@@ -670,6 +660,15 @@ export default function LeadsPage() {
               <Button variant="secondary" className="h-10 flex-1" onClick={() => setBatchOpen(true)}>
                 WhatsApp
               </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-10 w-10 shrink-0 text-destructive"
+                onClick={() => setDeleteOpen(true)}
+                aria-label="Delete selected leads"
+              >
+                <Trash2 />
+              </Button>
             </div>
           </div>
         </div>
@@ -687,6 +686,32 @@ export default function LeadsPage() {
         onOpenChange={setStageChangeOpen}
         onComplete={handleBatchComplete}
       />
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Delete {selectedLeads.length} lead{selectedLeads.length === 1 ? "" : "s"}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently deletes the selected leads along with their notes, tasks and
+              activity. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkDelete.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={bulkDelete.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                void handleBulkDelete();
+              }}
+            >
+              {bulkDelete.isPending ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <BatchWhatsAppSheet
         leads={selectedLeads}
         open={batchOpen}

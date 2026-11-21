@@ -181,9 +181,8 @@ export function LeadDetailPanel({ id, embedded = false, onDeleted }: LeadDetailP
 
   async function handleDelete() {
     try {
-      const result = await deleteLead.mutateAsync(id);
-      toast.success(result.sheetCleared ? "Lead deleted from app and sheet" : "Lead deleted");
-      if (result.warning) toast.warning(result.warning);
+      await deleteLead.mutateAsync(id);
+      toast.success("Lead deleted");
       if (onDeleted) {
         onDeleted();
       } else {
@@ -193,8 +192,6 @@ export function LeadDetailPanel({ id, embedded = false, onDeleted }: LeadDetailP
       toast.error("Failed to delete lead");
     }
   }
-
-  const isSheetTracked = lead.custom_data?.imported_from_sheet === true;
 
   return (
     <div className="flex flex-col gap-6 p-4">
@@ -221,7 +218,6 @@ export function LeadDetailPanel({ id, embedded = false, onDeleted }: LeadDetailP
               <AlertDialogTitle>Delete lead?</AlertDialogTitle>
               <AlertDialogDescription>
                 Are you sure you want to delete {lead.name}? This action cannot be undone.
-                {isSheetTracked && " Its row will also be removed from the connected sheet."}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
