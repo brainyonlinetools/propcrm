@@ -39,6 +39,7 @@ import {
 } from "@/lib/queries/sellers";
 import { useInventory } from "@/lib/queries/inventory";
 import {
+  cn,
   formatCurrency,
   formatDisplayDate,
   formatPhone,
@@ -158,7 +159,7 @@ export function SellerDetailPanel({
     }
   }
 
-  const details: { label: string; value: string | null }[] = [
+  const details: { label: string; value: string | null; alwaysShow?: boolean }[] = [
     { label: "Phone", value: seller.contact_phone ? formatPhone(seller.contact_phone) : null },
     { label: "Alternate phone", value: seller.alt_phone ? formatPhone(seller.alt_phone) : null },
     { label: "Email", value: seller.email },
@@ -176,6 +177,7 @@ export function SellerDetailPanel({
     {
       label: "Asking price",
       value: seller.asking_price != null ? formatCurrency(seller.asking_price) : null,
+      alwaysShow: true,
     },
     {
       label: "Follow-up",
@@ -292,14 +294,16 @@ export function SellerDetailPanel({
         <h2 className="mb-3 text-sm font-semibold">Seller Details</h2>
         <div className="flex flex-col gap-2.5">
           {details
-            .filter((d) => d.value)
+            .filter((d) => d.value || d.alwaysShow)
             .map((d) => (
               <div key={d.label} className="flex items-center justify-between gap-3 text-sm">
                 <span className="shrink-0 text-muted-foreground">{d.label}</span>
-                <span className="truncate font-medium">{d.value}</span>
+                <span className={cn("truncate font-medium", !d.value && "text-muted-foreground")}>
+                  {d.value || "Not set"}
+                </span>
               </div>
             ))}
-          {details.every((d) => !d.value) && (
+          {details.every((d) => !d.value && !d.alwaysShow) && (
             <p className="text-sm text-muted-foreground">No details added yet</p>
           )}
         </div>

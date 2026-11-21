@@ -6,12 +6,37 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+const LAKH = 1_00_000;
+const CRORE = 1_00_00_000;
+
 export function formatCurrency(amount: number | null | undefined): string {
   if (amount == null) return "—";
-  if (amount >= 10_00_000) {
-    return `₹${(amount / 10_00_000).toFixed(2)} Cr`;
+  if (amount >= CRORE) {
+    return `₹${trimZeros((amount / CRORE).toFixed(2))} Cr`;
+  }
+  if (amount >= LAKH) {
+    return `₹${trimZeros((amount / LAKH).toFixed(2))} L`;
   }
   return `₹${amount.toLocaleString("en-IN")}`;
+}
+
+function trimZeros(value: string): string {
+  return value.replace(/\.?0+$/, "");
+}
+
+/**
+ * Parse a rupee amount typed the way people quote prices: "28500000",
+ * "2,85,00,000", "₹2.85 Cr", "85 L", "85 lakh". Returns null when the text
+ * is blank or not a price.
+ */
+export function parsePrice(raw: string | null | undefined): number | null {
+  const text = (raw ?? "").toLowerCase().replace(/[,₹\s]/g, "").replace(/^rs\.?/, "");
+  if (!text) return null;
+  const match = text.match(/^(\d+(?:\.\d+)?)(cr|crore|crores|l|lac|lacs|lakh|lakhs)?$/);
+  if (!match) return null;
+  const num = Number(match[1]);
+  if (!match[2]) return num;
+  return Math.round(num * (match[2].startsWith("c") ? CRORE : LAKH));
 }
 
 export function formatPhone(phone: string | null | undefined): string {

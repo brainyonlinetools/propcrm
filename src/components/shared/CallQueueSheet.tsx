@@ -26,6 +26,15 @@ export interface CallQueueContact {
   subtitle?: string | null;
 }
 
+/** Optional step offered after an outcome is logged, before moving to the next contact. */
+export interface FollowUpPrompt {
+  title: string;
+  description?: string;
+  /** Rendered inside the prompt; call `done` when the action finished. */
+  render: (done: () => void) => React.ReactNode;
+  skipLabel?: string;
+}
+
 interface CallQueueSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -36,6 +45,8 @@ interface CallQueueSheetProps {
     outcome: CallOutcome,
     opts?: { note?: string; followUpDate?: string }
   ) => Promise<void>;
+  /** Return a prompt to show after this outcome, or null to go straight to the next contact. */
+  followUp?: (contact: CallQueueContact, outcome: CallOutcome) => FollowUpPrompt | null;
 }
 
 const OUTCOMES = Object.keys(CALL_OUTCOME_LABELS) as CallOutcome[];
@@ -50,6 +61,7 @@ export function CallQueueSheet({
   title,
   contacts,
   onLogOutcome,
+  followUp,
 }: CallQueueSheetProps) {
   const [index, setIndex] = useState(0);
   const [logged, setLogged] = useState(0);
@@ -57,6 +69,7 @@ export function CallQueueSheet({
   const [callbackDate, setCallbackDate] = useState(defaultCallbackDate);
   const [confirmingCallback, setConfirmingCallback] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [prompt, setPrompt] = useState<FollowUpPrompt | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -66,6 +79,7 @@ export function CallQueueSheet({
       setCallbackDate(defaultCallbackDate());
       setConfirmingCallback(false);
       setSaving(false);
+      setPrompt(null);
     }
   }, [open ]);
 
@@ -74,6 +88,7 @@ export function CallQueueSheet({
   const upNext = useMemo(() => contacts.slice(index + 1, index + 4), [contacts, index]);
 
   function advance() {
+    setPrompt(null);
     setIndex((i) => i + 1);
     setNote("");
     setCallbackDate(defaultCallbackDate());
@@ -93,7 +108,12 @@ export function CallQueueSheet({
         followUpDate: outcome === "callback" ? callbackDate : undefined,
       });
       setLogged((n) => n + 1);
-      advance();
+      const next = followUp?.(current, outcome) ?? null;
+      if (next) {
+        setPrompt(next);
+      } else {
+        advance();
+      }
     } finally {
       setSaving(false);
     }
@@ -159,6 +179,21 @@ export function CallQueueSheet({
                 </div>
               </div>
 
+              {prompt ? (
+                <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4 shadow-card">
+                  <div>
+                    <h3 className="text-base font-semibold">{prompt.title}</h3>
+                    {prompt.description && (
+                      <p className="mt-0.5 text-sm text-muted-foreground">{prompt.description}</p>
+                    )}
+                  </div>
+                  {prompt.render(advance)}
+                  <Button variant="outline" className="h-11" onClick={advance}>
+                    {prompt.skipLabel ?? "Skip"}
+                  </Button>
+                </div>
+              ) : (
+              <>
               <div className="flex flex-col gap-2">
                 <Label htmlFor="call-queue-note">Note (optional)</Label>
                 <Input
@@ -223,6 +258,8 @@ export function CallQueueSheet({
                   </div>
                 )}
               </div>
+              </>
+              )}
 
               {upNext.length > 0 && (
                 <div className="text-sm">

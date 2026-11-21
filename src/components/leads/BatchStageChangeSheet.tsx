@@ -1,8 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
 import {
   Sheet,
   SheetContent,
@@ -10,10 +8,10 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { useBulkUpdateLeadStage } from "@/lib/queries/leads";
 import { usePipelineStages } from "@/lib/queries/pipelineStages";
 import { cn } from "@/lib/utils";
 import type { Lead } from "@/types";
+import { StageMoveForm } from "./StageMoveForm";
 
 interface BatchStageChangeSheetProps {
   leads: Lead[];
@@ -29,36 +27,12 @@ export function BatchStageChangeSheet({
   onComplete,
 }: BatchStageChangeSheetProps) {
   const { data: stages = [] } = usePipelineStages();
-  const bulkUpdate = useBulkUpdateLeadStage();
   const [selectedStageId, setSelectedStageId] = useState<string | null>(null);
-
-  function resetState() {
-    setSelectedStageId(null);
-  }
+  const selectedStage = stages.find((s) => s.id === selectedStageId) ?? null;
 
   function handleOpenChange(nextOpen: boolean) {
-    if (!nextOpen) resetState();
+    if (!nextOpen) setSelectedStageId(null);
     onOpenChange(nextOpen);
-  }
-
-  async function handleApply() {
-    if (!selectedStageId || leads.length === 0) return;
-
-    const stageLabel = stages.find((s) => s.id === selectedStageId)?.label ?? "stage";
-
-    try {
-      await bulkUpdate.mutateAsync({
-        ids: leads.map((lead) => lead.id),
-        stage_id: selectedStageId,
-      });
-      toast.success(
-        `Updated ${leads.length} lead${leads.length === 1 ? "" : "s"} to ${stageLabel}`
-      );
-      handleOpenChange(false);
-      onComplete?.();
-    } catch {
-      toast.error("Failed to update stages");
-    }
   }
 
   return (
@@ -108,15 +82,18 @@ export function BatchStageChangeSheet({
             </div>
           </div>
 
-          <Button
-            className="h-12"
-            disabled={!selectedStageId || bulkUpdate.isPending}
-            onClick={handleApply}
-          >
-            {bulkUpdate.isPending
-              ? "Updating…"
-              : `Update ${leads.length} lead${leads.length === 1 ? "" : "s"}`}
-          </Button>
+          {selectedStage && leads.length > 0 && (
+            <StageMoveForm
+              key={selectedStage.id}
+              leads={leads}
+              stage={selectedStage}
+              submitLabel={`Update ${leads.length} lead${leads.length === 1 ? "" : "s"}`}
+              onDone={() => {
+                handleOpenChange(false);
+                onComplete?.();
+              }}
+            />
+          )}
         </div>
       </SheetContent>
     </Sheet>

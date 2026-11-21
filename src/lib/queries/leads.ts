@@ -2,7 +2,6 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import type { Json } from "@/types/database";
 import type { Lead, LeadInsert } from "@/types";
-import { QUALIFIED_STAGE_LABEL } from "@/types";
 import { normalizePhoneKey } from "@/lib/utils";
 
 export const leadsKey = ["leads"] as const;
@@ -51,7 +50,7 @@ export function useLeads() {
         .select(
           `
           *,
-          pipeline_stages(id, label, color, sort_order)
+          pipeline_stages(id, label, color, sort_order, kind)
         `
         )
         .order("created_at", { ascending: false });
@@ -60,36 +59,6 @@ export function useLeads() {
         normalizeLeadRow(row as Lead & { custom_data: unknown })
       );
       return sortLeadsByDateDesc(leads);
-    },
-  });
-}
-
-export function useQualifiedLeads() {
-  return useQuery({
-    queryKey: qualifiedLeadsKey,
-    queryFn: async () => {
-      const { data: stage, error: stageError } = await supabase
-        .from("pipeline_stages")
-        .select("id")
-        .eq("label", QUALIFIED_STAGE_LABEL)
-        .maybeSingle();
-      if (stageError) throw stageError;
-      if (!stage) return [] as Lead[];
-
-      const { data, error } = await supabase
-        .from("leads")
-        .select(
-          `
-          *,
-          pipeline_stages(id, label, color, sort_order)
-        `
-        )
-        .eq("stage_id", stage.id)
-        .order("updated_at", { ascending: false });
-      if (error) throw error;
-      return sortLeadsByDateDesc(
-        (data ?? []).map((row) => normalizeLeadRow(row as Lead & { custom_data: unknown }))
-      );
     },
   });
 }
@@ -103,7 +72,7 @@ export function useLead(id: string) {
         .select(
           `
           *,
-          pipeline_stages(id, label, color, sort_order)
+          pipeline_stages(id, label, color, sort_order, kind)
         `
         )
         .eq("id", id)
@@ -209,60 +178,6 @@ export function useUpdateLead() {
       queryClient.invalidateQueries({ queryKey: leadsKey });
       queryClient.invalidateQueries({ queryKey: qualifiedLeadsKey });
       queryClient.invalidateQueries({ queryKey: leadKey(data.id) });
-    },
-  });
-}
-
-export function useUpdateLeadStage() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ id, stage_id }: { id: string; stage_id: string | null }) => {
-      const { data, error } = await supabase
-        .from("leads")
-        .update({ stage_id })
-        .eq("id", id)
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
-    },
-    onMutate: async ({ id, stage_id }) => {
-      await queryClient.cancelQueries({ queryKey: leadsKey });
-      const previous = queryClient.getQueryData<Lead[]>(leadsKey);
-      if (previous) {
-        queryClient.setQueryData<Lead[]>(
-          leadsKey,
-          previous.map((lead) => (lead.id === id ? { ...lead, stage_id } : lead))
-        );
-      }
-      return { previous };
-    },
-    onError: (_err, _vars, context) => {
-      if (context?.previous) {
-        queryClient.setQueryData(leadsKey, context.previous);
-      }
-    },
-    onSettled: (_data, _err, vars) => {
-      queryClient.invalidateQueries({ queryKey: leadsKey });
-      queryClient.invalidateQueries({ queryKey: qualifiedLeadsKey });
-      queryClient.invalidateQueries({ queryKey: leadKey(vars.id) });
-    },
-  });
-}
-
-export function useBulkUpdateLeadStage() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ ids, stage_id }: { ids: string[]; stage_id: string }) => {
-      const { error } = await supabase
-        .from("leads")
-        .update({ stage_id })
-        .in("id", ids);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: leadsKey });
-      queryClient.invalidateQueries({ queryKey: qualifiedLeadsKey });
     },
   });
 }

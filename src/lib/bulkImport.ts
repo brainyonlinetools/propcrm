@@ -133,7 +133,8 @@ export function parseLeadRows(
   const valid: LeadInsert[] = [];
   const errors: BulkRowError[] = [];
   const warnings: BulkRowError[] = [];
-  const defaultStageId = stages[0]?.id ?? null;
+  const defaultStageId =
+    stages.find((s) => s.kind === "entry")?.id ?? stages[0]?.id ?? null;
 
   rows.forEach((row, index) => {
     const rowNum = index + 2;

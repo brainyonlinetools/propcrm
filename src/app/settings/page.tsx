@@ -66,7 +66,7 @@ import {
 } from "@/lib/queries/whatsappTemplates";
 import { getAgentName, setAgentName, slugify } from "@/lib/utils";
 import { getWhatsAppTemplateVariables } from "@/lib/whatsappTemplates";
-import type { EntityType, FieldDefinition, FieldType } from "@/types";
+import type { EntityType, FieldDefinition, FieldType, StageKind } from "@/types";
 
 const FIELD_TYPES: { value: FieldType; label: string }[] = [
   { value: "text", label: "Text" },
@@ -448,12 +448,20 @@ function PipelineManager() {
   );
 }
 
+const STAGE_KIND_LABELS: Record<StageKind, string> = {
+  entry: "Raw leads",
+  active: "Active",
+  won: "Won",
+  lost: "Lost",
+  disqualified: "Disqualified",
+};
+
 function SortableStageRow({
   stage,
   onUpdate,
   onDelete,
 }: {
-  stage: { id: string; label: string; color: string };
+  stage: { id: string; label: string; color: string; kind: StageKind };
   onUpdate: (updates: { label?: string; color?: string }) => Promise<unknown>;
   onDelete: () => Promise<unknown>;
 }) {
@@ -483,9 +491,19 @@ function SortableStageRow({
           if (e.target.value !== stage.label) onUpdate({ label: e.target.value });
         }}
       />
+      {stage.kind !== "active" && (
+        <span className="shrink-0 rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+          {STAGE_KIND_LABELS[stage.kind]}
+        </span>
+      )}
       <AlertDialog>
         <AlertDialogTrigger asChild>
-          <Button variant="ghost" size="icon-sm">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            disabled={stage.kind !== "active"}
+            title={stage.kind !== "active" ? "Built-in stage" : undefined}
+          >
             <Trash2 className="text-destructive" />
           </Button>
         </AlertDialogTrigger>

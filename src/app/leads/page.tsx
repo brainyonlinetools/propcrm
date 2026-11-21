@@ -33,21 +33,35 @@ import {
 import { StageBadge } from "@/components/shared/StatusBadge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PullToRefresh } from "@/components/shared/PullToRefresh";
-import { CallQueueSheet, type CallQueueContact } from "@/components/shared/CallQueueSheet";
+import {
+  CallQueueSheet,
+  type CallQueueContact,
+  type FollowUpPrompt,
+} from "@/components/shared/CallQueueSheet";
+import { AttemptBadge } from "@/components/leads/AttemptBadge";
+import { StageMoveForm } from "@/components/leads/StageMoveForm";
 import { useIsDesktop } from "@/hooks/useIsDesktop";
 import { leadsKey, useBulkDeleteLeads, useLeads } from "@/lib/queries/leads";
 import { usePipelineStages } from "@/lib/queries/pipelineStages";
+import { fetchOpenTaskLeadIds, useMoveLeads } from "@/lib/queries/leadMoves";
 import { useCreateLeadNote, useCreateTask } from "@/lib/queries/tasks";
-import { cn, formatDisplayDate, formatPhone, formatRelativeDate } from "@/lib/utils";
 import {
-  CALL_OUTCOME_LABELS,
-  DISQUALIFIED_STAGE_LABEL,
-  isArchivedLead,
-  type CallOutcome,
-} from "@/types";
+  contactStatus,
+  dateInDays,
+  findCallBackStage,
+  findFirstActiveStage,
+  findStageByKind,
+  isClosedLead,
+  isEntryLead,
+  leadStageKind,
+  suggestAfterCall,
+  type ContactStatus,
+} from "@/lib/leadFlow";
+import { cn, formatDisplayDate, formatPhone, formatRelativeDate } from "@/lib/utils";
+import { CALL_OUTCOME_LABELS, type CallOutcome } from "@/types";
 
 type ViewMode = "list" | "kanban";
-type LeadViewFilter = "active" | "archived";
+type LeadViewFilter = "active" | "closed";
 type LeadTab = "raw" | "pipeline";
 
 export default function LeadsPage() {
@@ -59,6 +73,7 @@ export default function LeadsPage() {
   const [sourceFilter, setSourceFilter] = useState<string | null>(null);
   const [projectFilter, setProjectFilter] = useState<string | null>(null);
   const [viewFilter, setViewFilter] = useState<LeadViewFilter>("active");
+  const [contactFilter, setContactFilter] = useState<ContactStatus | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -72,6 +87,7 @@ export default function LeadsPage() {
   const [callQueueOpen, setCallQueueOpen] = useState(false);
   const [callQueue, setCallQueue] = useState<CallQueueContact[]>([]);
   const queryClient = useQueryClient();
+  const moveLeads = useMoveLeads();
   const createLeadNote = useCreateLeadNote();
   const createTask = useCreateTask();
 
@@ -82,23 +98,19 @@ export default function LeadsPage() {
     () => [...stages].sort((a, b) => a.sort_order - b.sort_order),
     [stages]
   );
-  const rawStageId = sortedStages[0]?.id ?? null;
 
-  const rawLeads = useMemo(
-    () => leads.filter((lead) => lead.stage_id === rawStageId || lead.stage_id == null),
-    [leads, rawStageId]
-  );
+  const rawLeads = useMemo(() => leads.filter(isEntryLead), [leads]);
 
   const pipelineLeads = useMemo(
     () =>
       leads.filter((lead) => {
-        if (lead.stage_id == null || lead.stage_id === rawStageId) return false;
-        const archived = isArchivedLead(lead);
-        if (viewFilter === "active" && archived) return false;
-        if (viewFilter === "archived" && !archived) return false;
+        if (isEntryLead(lead)) return false;
+        const closed = isClosedLead(lead);
+        if (viewFilter === "active" && closed) return false;
+        if (viewFilter === "closed" && !closed) return false;
         return true;
       }),
-    [leads, rawStageId, viewFilter]
+    [leads, viewFilter]
   );
 
   const sourceLeads = leadTab === "raw" ? rawLeads : pipelineLeads;
@@ -115,10 +127,11 @@ export default function LeadsPage() {
   );
 
   const visibleStages = useMemo(() => {
-    const rest = sortedStages.filter((s) => s.id !== rawStageId);
-    if (viewFilter === "archived") return rest;
-    return rest.filter((s) => s.label !== DISQUALIFIED_STAGE_LABEL);
-  }, [sortedStages, rawStageId, viewFilter]);
+    const rest = sortedStages.filter((s) => s.kind !== "entry");
+    return viewFilter === "closed"
+      ? rest.filter((s) => s.kind !== "active")
+      : rest.filter((s) => s.kind === "active");
+  }, [sortedStages, viewFilter]);
 
   const filtered = useMemo(() => {
     return sourceLeads.filter((lead) => {
@@ -132,9 +145,13 @@ export default function LeadsPage() {
       const matchesSource = !sourceFilter || lead.source === sourceFilter;
       const matchesProject =
         !projectFilter || lead.project_interest === projectFilter;
-      return matchesSearch && matchesStage && matchesSource && matchesProject;
+      const matchesContact =
+        leadTab !== "raw" || !contactFilter || contactStatus(lead) === contactFilter;
+      return (
+        matchesSearch && matchesStage && matchesSource && matchesProject && matchesContact
+      );
     });
-  }, [sourceLeads, search, stageFilter, sourceFilter, projectFilter]);
+  }, [sourceLeads, search, stageFilter, sourceFilter, projectFilter, contactFilter, leadTab]);
 
   const listView = view === "list" || leadTab === "raw";
   const splitMode = isDesktop && listView && !selectionMode;
@@ -147,6 +164,7 @@ export default function LeadsPage() {
 
   const activeFilterCount = [
     leadTab === "pipeline" && viewFilter !== "active" ? viewFilter : null,
+    leadTab === "raw" ? contactFilter : null,
     leadTab === "pipeline" ? stageFilter : null,
     sourceFilter,
     projectFilter,
@@ -159,6 +177,7 @@ export default function LeadsPage() {
     setStageFilter(null);
     setSourceFilter(null);
     setProjectFilter(null);
+    setContactFilter(null);
   }
 
   async function handleRefresh() {
@@ -292,6 +311,73 @@ export default function LeadsPage() {
       toast.error(`Failed to log call for ${contact.name}`);
       throw new Error("call-log-failed");
     }
+
+    // Outcome-driven follow-through. The call itself is already logged, so a
+    // failure here only affects the extra step and never blocks the queue.
+    const lead = leads.find((l) => l.id === contact.recordId);
+    if (!lead || isClosedLead(lead)) return;
+    try {
+      if (outcome === "callback") {
+        const callBack = findCallBackStage(stages);
+        if (callBack && lead.stage_id !== callBack.id) {
+          await moveLeads.mutateAsync({ ids: [lead.id], stage_id: callBack.id });
+        }
+      } else if (outcome === "no_answer") {
+        const hasTask = (await fetchOpenTaskLeadIds([lead.id])).has(lead.id);
+        if (!hasTask) {
+          await createTask.mutateAsync({
+            lead_id: lead.id,
+            title: `Call ${contact.name} again`,
+            due_date: dateInDays(1),
+            due_time: null,
+          });
+          toast.info(`Follow-up set for tomorrow`);
+        }
+      }
+    } catch {
+      toast.warning(`Call logged, but the follow-up for ${contact.name} could not be set`);
+    }
+  }
+
+  function followUpForOutcome(
+    contact: CallQueueContact,
+    outcome: CallOutcome
+  ): FollowUpPrompt | null {
+    const lead = leads.find((l) => l.id === contact.recordId);
+    if (!lead) return null;
+    const suggestion = suggestAfterCall(outcome, leadStageKind(lead));
+
+    if (suggestion.type === "qualify") {
+      const stage = findFirstActiveStage(stages);
+      if (!stage) return null;
+      return {
+        title: `Qualify ${lead.name}?`,
+        description: `Move to ${stage.label} and set a next step.`,
+        skipLabel: "Not yet",
+        render: (done) => (
+          <StageMoveForm leads={[lead]} stage={stage} submitLabel="Qualify" onDone={done} />
+        ),
+      };
+    }
+    if (suggestion.type === "disqualify") {
+      const stage = findStageByKind(stages, "disqualified");
+      if (!stage) return null;
+      return {
+        title: `Disqualify ${lead.name}?`,
+        description: "Moves the lead out of your working lists.",
+        skipLabel: "Keep as is",
+        render: (done) => (
+          <StageMoveForm
+            leads={[lead]}
+            stage={stage}
+            initialReason={suggestion.reason}
+            submitLabel="Disqualify"
+            onDone={done}
+          />
+        ),
+      };
+    }
+    return null;
   }
 
   const listHeader = (
@@ -412,21 +498,57 @@ export default function LeadsPage() {
               </div>
             )}
 
+            {leadTab === "raw" && (
+              <CollapsibleFilterSection
+                title="Contact"
+                summary={
+                  contactFilter === "untouched"
+                    ? "Untouched"
+                    : contactFilter === "attempted"
+                      ? "Attempted"
+                      : "All"
+                }
+                hasActiveFilter={Boolean(contactFilter)}
+              >
+                <FilterChip
+                  label="All"
+                  active={!contactFilter}
+                  onClick={() => setContactFilter(null)}
+                />
+                <FilterChip
+                  label="Untouched"
+                  active={contactFilter === "untouched"}
+                  onClick={() => setContactFilter("untouched")}
+                />
+                <FilterChip
+                  label="Attempted"
+                  active={contactFilter === "attempted"}
+                  onClick={() => setContactFilter("attempted")}
+                />
+              </CollapsibleFilterSection>
+            )}
+
             {leadTab === "pipeline" && (
               <CollapsibleFilterSection
                 title="View"
-                summary={viewFilter === "archived" ? "Archived" : "Active"}
+                summary={viewFilter === "closed" ? "Closed" : "Active"}
                 hasActiveFilter={viewFilter !== "active"}
               >
                 <FilterChip
                   label="Active"
                   active={viewFilter === "active"}
-                  onClick={() => setViewFilter("active")}
+                  onClick={() => {
+                    setViewFilter("active");
+                    setStageFilter(null);
+                  }}
                 />
                 <FilterChip
-                  label="Archived"
-                  active={viewFilter === "archived"}
-                  onClick={() => setViewFilter("archived")}
+                  label="Closed"
+                  active={viewFilter === "closed"}
+                  onClick={() => {
+                    setViewFilter("closed");
+                    setStageFilter(null);
+                  }}
                 />
               </CollapsibleFilterSection>
             )}
@@ -529,8 +651,8 @@ export default function LeadsPage() {
                   ? "No raw leads"
                   : "No matching leads"
                 : sourceLeads.length === 0
-                  ? viewFilter === "archived"
-                    ? "No archived leads"
+                  ? viewFilter === "closed"
+                    ? "No closed leads"
                     : "No leads in pipeline"
                   : "No matching leads"
             }
@@ -540,8 +662,8 @@ export default function LeadsPage() {
                   ? "New enquiries land here. Qualify them to move them into the pipeline."
                   : "Try adjusting your search or filters."
                 : sourceLeads.length === 0
-                  ? viewFilter === "archived"
-                    ? "Leads marked as Disqualified appear here."
+                  ? viewFilter === "closed"
+                    ? "Won, Lost and Disqualified leads appear here."
                     : "Move raw leads into a pipeline stage to start working them."
                   : "Try adjusting your search or filters."
             }
@@ -569,7 +691,9 @@ export default function LeadsPage() {
                     : formatDisplayDate(lead.acquired_date ?? lead.created_at)
                 }
                 badge={
-                  lead.pipeline_stages ? (
+                  leadTab === "raw" ? (
+                    <AttemptBadge lead={lead} />
+                  ) : lead.pipeline_stages ? (
                     <StageBadge
                       label={lead.pipeline_stages.label}
                       color={lead.pipeline_stages.color}
@@ -724,6 +848,7 @@ export default function LeadsPage() {
         title={leadTab === "raw" ? "Calling raw leads" : "Calling pipeline leads"}
         contacts={callQueue}
         onLogOutcome={handleCallOutcome}
+        followUp={followUpForOutcome}
       />
     </>
   );

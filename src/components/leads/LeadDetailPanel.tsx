@@ -40,6 +40,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { DynamicFieldRenderer } from "@/components/shared/DynamicFieldRenderer";
+import { useStageChangeFlow } from "@/components/leads/StageChangeSheet";
 import { StageBadge } from "@/components/shared/StatusBadge";
 import { CallButton } from "@/components/shared/CallButton";
 import { WhatsAppButton } from "@/components/shared/WhatsAppButton";
@@ -73,6 +74,7 @@ export function LeadDetailPanel({ id, embedded = false, onDeleted }: LeadDetailP
   const { data: tasks = [] } = useLeadTasks(id);
   const { data: inventory = [] } = useInventory();
   const updateLead = useUpdateLead();
+  const { requestMove, stageDialog } = useStageChangeFlow();
   const deleteLead = useDeleteLead();
   const createNote = useCreateLeadNote();
   const createTask = useCreateTask();
@@ -128,12 +130,9 @@ export function LeadDetailPanel({ id, embedded = false, onDeleted }: LeadDetailP
   }
 
   async function handleStageChange(stageId: string) {
-    try {
-      await updateLead.mutateAsync({ id: lead!.id, stage_id: stageId });
-      toast.success("Stage updated");
-    } catch {
-      toast.error("Failed to update stage");
-    }
+    const stage = stages.find((s) => s.id === stageId);
+    if (!lead || !stage || stage.id === lead.stage_id) return;
+    await requestMove([lead], stage);
   }
 
   async function handleAddNote() {
@@ -269,6 +268,9 @@ export function LeadDetailPanel({ id, embedded = false, onDeleted }: LeadDetailP
             </SelectContent>
           </Select>
         </div>
+        {lead.close_reason && (
+          <p className="mt-2 text-xs text-muted-foreground">Reason: {lead.close_reason}</p>
+        )}
       </section>
 
       <section className="rounded-lg border border-border bg-card p-4 shadow-card">
@@ -442,6 +444,7 @@ export function LeadDetailPanel({ id, embedded = false, onDeleted }: LeadDetailP
       </section>
 
       <LeadForm open={editOpen} onOpenChange={setEditOpen} lead={lead} />
+      {stageDialog}
     </div>
   );
 }

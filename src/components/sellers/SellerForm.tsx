@@ -1,5 +1,6 @@
 "use client";
 
+import { formatCurrency, parsePrice } from "@/lib/utils";
 import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -52,6 +53,12 @@ type SellerFormValues = z.infer<typeof sellerSchema>;
 
 const UNASSIGNED = "__unassigned__";
 
+function priceError(raw: string | undefined): string | null {
+  return raw?.trim() && parsePrice(raw) == null
+    ? "Enter an amount like 28500000, 2.85 Cr or 85 L"
+    : null;
+}
+
 function toNumberOrNull(raw: string | undefined): number | null {
   if (!raw || !raw.trim()) return null;
   const num = Number(raw.replace(/[,₹\s]/g, ""));
@@ -102,6 +109,7 @@ export function SellerForm({ open, onOpenChange, seller = null }: SellerFormProp
     reset,
     setValue,
     watch,
+    setError,
     formState: { errors },
   } = useForm<SellerFormValues>({
     resolver: zodResolver(sellerSchema),
@@ -114,9 +122,16 @@ export function SellerForm({ open, onOpenChange, seller = null }: SellerFormProp
 
   const availableForSale = watch("available_for_sale");
   const projectId = watch("project_id");
+  const askingPriceText = watch("asking_price");
+  const parsedAskingPrice = parsePrice(askingPriceText);
   const isPending = createSeller.isPending || updateSeller.isPending;
 
   async function onSubmit(values: SellerFormValues) {
+    const askingPriceProblem = priceError(values.asking_price);
+    if (askingPriceProblem) {
+      setError("asking_price", { message: askingPriceProblem });
+      return;
+    }
     const assigned = assignSplitPhones(values.contact_phone, values.alt_phone);
     const payload: SellerInsert = {
       owner_name: values.owner_name.trim(),
@@ -132,7 +147,7 @@ export function SellerForm({ open, onOpenChange, seller = null }: SellerFormProp
       area_sqft: toNumberOrNull(values.area_sqft),
       facing: toTextOrNull(values.facing),
       parking: toNumberOrNull(values.parking),
-      asking_price: toNumberOrNull(values.asking_price),
+      asking_price: parsePrice(values.asking_price),
       available_for_sale: values.available_for_sale,
       remarks: mergeRemarksPhones(values.remarks, assigned.extras),
       follow_up_date: toTextOrNull(values.follow_up_date),
@@ -315,10 +330,21 @@ export function SellerForm({ open, onOpenChange, seller = null }: SellerFormProp
               <Input
                 id="seller-price"
                 className="h-12"
-                inputMode="numeric"
-                placeholder="28500000"
+                placeholder="2.85 Cr or 28500000"
+                aria-invalid={Boolean(errors.asking_price)}
                 {...register("asking_price")}
               />
+              {errors.asking_price ? (
+                <p className="text-xs text-destructive">{errors.asking_price.message}</p>
+              ) : parsedAskingPrice != null ? (
+                <p className="text-xs text-muted-foreground">
+                  = {formatCurrency(parsedAskingPrice)}
+                </p>
+              ) : availableForSale ? (
+                <p className="text-xs text-muted-foreground">
+                  Add the price the seller expects so inventory shows it.
+                </p>
+              ) : null}
             </div>
           </div>
 

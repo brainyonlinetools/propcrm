@@ -14,9 +14,8 @@ import {
 } from "@dnd-kit/core";
 import { useState, type CSSProperties } from "react";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
 import { LeadCard } from "@/components/leads/LeadCard";
-import { useUpdateLeadStage } from "@/lib/queries/leads";
+import { useStageChangeFlow } from "@/components/leads/StageChangeSheet";
 import type { Lead, PipelineStage } from "@/types";
 
 interface LeadKanbanProps {
@@ -27,7 +26,7 @@ interface LeadKanbanProps {
 
 export function LeadKanban({ leads, stages, className }: LeadKanbanProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
-  const updateStage = useUpdateLeadStage();
+  const { requestMove, stageDialog } = useStageChangeFlow();
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
@@ -47,16 +46,14 @@ export function LeadKanban({ leads, stages, className }: LeadKanbanProps) {
     const leadId = String(active.id);
     const stageId = String(over.id);
     const lead = leads.find((l) => l.id === leadId);
-    if (!lead || lead.stage_id === stageId) return;
+    const stage = stages.find((s) => s.id === stageId);
+    if (!lead || !stage || lead.stage_id === stageId) return;
 
-    try {
-      await updateStage.mutateAsync({ id: leadId, stage_id: stageId });
-    } catch {
-      toast.error("Failed to update stage");
-    }
+    await requestMove([lead], stage);
   }
 
   return (
+    <>
     <DndContext
       sensors={sensors}
       collisionDetection={closestCorners}
@@ -79,6 +76,8 @@ export function LeadKanban({ leads, stages, className }: LeadKanbanProps) {
         ) : null}
       </DragOverlay>
     </DndContext>
+    {stageDialog}
+    </>
   );
 }
 

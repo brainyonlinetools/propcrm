@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { AlertCircle } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
+import { AttemptBadge } from "@/components/leads/AttemptBadge";
+import { isEntryLead } from "@/lib/leadFlow";
 import { StageBadge } from "@/components/shared/StatusBadge";
 import { useFieldDefinitions } from "@/lib/queries/fieldDefinitions";
 import { cn, formatBudget, formatDisplayDate, formatPhone, formatRelativeDate } from "@/lib/utils";
@@ -51,11 +53,15 @@ export function LeadCard({
             </div>
           </div>
         </div>
-        {lead.pipeline_stages && (
-          <StageBadge
-            label={lead.pipeline_stages.label}
-            color={lead.pipeline_stages.color}
-          />
+        {isEntryLead(lead) ? (
+          <AttemptBadge lead={lead} />
+        ) : (
+          lead.pipeline_stages && (
+            <StageBadge
+              label={lead.pipeline_stages.label}
+              color={lead.pipeline_stages.color}
+            />
+          )
         )}
       </div>
 

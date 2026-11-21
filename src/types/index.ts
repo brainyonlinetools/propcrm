@@ -13,7 +13,7 @@ export type FieldType =
 
 export type InventoryStatus = "available" | "blocked" | "booked" | "sold";
 
-export type NoteType = "note" | "call" | "visit" | "whatsapp";
+export type NoteType = "note" | "call" | "visit" | "whatsapp" | "stage";
 
 export interface FieldDefinition {
   id: string;
@@ -33,7 +33,10 @@ export interface PipelineStage {
   label: string;
   color: string;
   sort_order: number;
+  kind: StageKind;
 }
+
+export type StageKind = "entry" | "active" | "won" | "lost" | "disqualified";
 
 export type ProjectStatus =
   | "upcoming"
@@ -107,6 +110,9 @@ export interface Lead {
   linked_unit_id: string | null;
   acquired_date: string | null;
   custom_data: Record<string, unknown>;
+  call_attempts: number;
+  last_contacted_at: string | null;
+  close_reason: string | null;
   created_at: string;
   updated_at: string;
   pipeline_stages?: PipelineStage | null;
@@ -183,6 +189,7 @@ export interface LeadInsert {
   linked_unit_id?: string | null;
   acquired_date?: string | null;
   custom_data?: Record<string, unknown>;
+  close_reason?: string | null;
 }
 
 export interface InventoryInsert {
@@ -295,16 +302,6 @@ export interface ProjectMediaInsert {
   sort_order?: number;
 }
 
-export const DISQUALIFIED_STAGE_LABEL = "Disqualified";
-export const QUALIFIED_STAGE_LABEL = "Qualified";
-
-export function isArchivedLead(lead: Pick<Lead, "pipeline_stages">): boolean {
-  return lead.pipeline_stages?.label === DISQUALIFIED_STAGE_LABEL;
-}
-
-export function isQualifiedLead(lead: Pick<Lead, "pipeline_stages">): boolean {
-  return lead.pipeline_stages?.label === QUALIFIED_STAGE_LABEL;
-}
 
 export const LEAD_SOURCES = ["Meta", "Google", "Reference", "Walk-in", "99acres", "MagicBricks"] as const;
 
@@ -339,4 +336,5 @@ export const NOTE_TYPE_CONFIG: Record<NoteType, { label: string; icon: string }>
   call: { label: "Call", icon: "📞" },
   visit: { label: "Visit", icon: "🏠" },
   whatsapp: { label: "WhatsApp", icon: "💬" },
+  stage: { label: "Stage", icon: "🔀" },
 };

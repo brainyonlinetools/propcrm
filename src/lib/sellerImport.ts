@@ -1,5 +1,6 @@
 import type { InventoryInsert, Project, SellerInsert } from "@/types";
 import type { BulkImportResult, BulkRowError } from "@/lib/bulkImport";
+import { parsePrice } from "@/lib/utils";
 import { assignSplitPhones, mergeRemarksPhones } from "@/lib/phoneNumbers";
 
 export const SELLER_IMPORT_HEADERS = [
@@ -156,7 +157,16 @@ export function parseSellerRows(
       errors.push(parking.error);
       return;
     }
-    const askingPrice = parseNumber(getValue(row, "asking_price"), rowNum, "Asking price");
+    const askingPriceRaw = getValue(row, "asking_price");
+    const askingPrice: { value: number | null; error?: BulkRowError } = {
+      value: parsePrice(askingPriceRaw),
+    };
+    if (askingPriceRaw && askingPrice.value == null) {
+      askingPrice.error = {
+        row: rowNum,
+        message: "Asking price must be an amount like 28500000, 2.85 Cr or 85 L",
+      };
+    }
     if (askingPrice.error) {
       errors.push(askingPrice.error);
       return;

@@ -9,11 +9,13 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TaskItem } from "@/components/tasks/TaskItem";
 import { PullToRefresh } from "@/components/shared/PullToRefresh";
+import { leadsKey, useLeads } from "@/lib/queries/leads";
 import { useTasks } from "@/lib/queries/tasks";
 import { sellersKey, useSellers } from "@/lib/queries/sellers";
+import { needsNextStep } from "@/lib/leadFlow";
 import { splitOverdueToday } from "@/lib/todayList";
 import { formatPhone, phoneToTel } from "@/lib/utils";
-import type { Seller } from "@/types";
+import type { Lead, Seller } from "@/types";
 
 export default function TodayPage() {
   const queryClient = useQueryClient();
@@ -23,6 +25,15 @@ export default function TodayPage() {
     useTasks(false);
   const { data: sellers = [], isLoading: sellersLoading, isError: sellersError } =
     useSellers();
+
+  const { data: leads = [] } = useLeads();
+
+  const needsStep = useMemo(() => {
+    const withTask = new Set(tasks.map((t) => t.lead_id));
+    return leads
+      .filter((lead) => needsNextStep(lead, withTask))
+      .toSorted((a, b) => b.updated_at.localeCompare(a.updated_at));
+  }, [leads, tasks]);
 
   const { overdueTasks, todayTasks, overdueSellers, todaySellers } = useMemo(() => {
     const taskSplit = splitOverdueToday(tasks, (t) => t.due_date, todayStr);
@@ -44,6 +55,7 @@ export default function TodayPage() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["tasks"] }),
       queryClient.invalidateQueries({ queryKey: sellersKey }),
+      queryClient.invalidateQueries({ queryKey: leadsKey }),
     ]);
   }
 
@@ -74,7 +86,7 @@ export default function TodayPage() {
               Try again
             </Button>
           </div>
-        ) : totalCount === 0 ? (
+        ) : totalCount === 0 && needsStep.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border bg-card p-8 text-center">
             <h2 className="text-base font-semibold">All clear</h2>
             <p className="mt-2 text-sm text-muted-foreground">
@@ -106,6 +118,21 @@ export default function TodayPage() {
                   ))}
                   {todaySellers.map((seller) => (
                     <SellerFollowUpRow key={seller.id} seller={seller} />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {totalCount === 0 && (
+              <p className="text-sm text-muted-foreground">Nothing due today.</p>
+            )}
+
+            {needsStep.length > 0 && (
+              <section>
+                <SectionTitle label={`Needs a next step · ${needsStep.length}`} />
+                <div className="flex flex-col gap-3">
+                  {needsStep.map((lead) => (
+                    <LeadNeedsStepRow key={lead.id} lead={lead} />
                   ))}
                 </div>
               </section>
@@ -145,6 +172,30 @@ function SellerFollowUpRow({ seller }: { seller: Seller }) {
       {phone && (
         <Button asChild variant="outline" size="icon" className="shrink-0" aria-label={`Call ${seller.owner_name}`}>
           <a href={`tel:${phoneToTel(phone)}`}>
+            <Phone />
+          </a>
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function LeadNeedsStepRow({ lead }: { lead: Lead }) {
+  const subtitle = [lead.pipeline_stages?.label, lead.project_interest]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-border bg-card p-3 shadow-card">
+      <Link href={`/leads/${lead.id}`} className="min-w-0 flex-1 rounded-md hover:opacity-80">
+        <p className="truncate text-sm font-semibold">{lead.name}</p>
+        <p className="mt-0.5 truncate text-xs text-muted-foreground">
+          {[subtitle, lead.phone ? formatPhone(lead.phone) : null].filter(Boolean).join(" · ")}
+        </p>
+      </Link>
+      {lead.phone && (
+        <Button asChild variant="outline" size="icon" className="shrink-0" aria-label={`Call ${lead.name}`}>
+          <a href={`tel:${phoneToTel(lead.phone)}`}>
             <Phone />
           </a>
         </Button>

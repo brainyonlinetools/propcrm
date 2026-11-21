@@ -31,6 +31,7 @@ import {
   useLeads,
   useUpdateLead,
 } from "@/lib/queries/leads";
+import { findStageByKind } from "@/lib/leadFlow";
 import { usePipelineStages } from "@/lib/queries/pipelineStages";
 import { formatPhone, normalizePhoneKey } from "@/lib/utils";
 import { LEAD_SOURCES, type Lead } from "@/types";
@@ -85,6 +86,7 @@ export function LeadForm({ open, onOpenChange, lead }: LeadFormProps) {
   const [customData, setCustomData] = useState<Record<string, unknown>>({});
   const [duplicateLead, setDuplicateLead] = useState<Lead | null>(null);
   const { data: stages = [] } = usePipelineStages();
+  const entryStageId = findStageByKind(stages, "entry")?.id ?? stages[0]?.id ?? null;
   const { data: leads = [] } = useLeads();
   const createLead = useCreateLead();
   const updateLead = useUpdateLead();
@@ -139,7 +141,7 @@ export function LeadForm({ open, onOpenChange, lead }: LeadFormProps) {
         phone: "",
         alt_phone: "",
         email: "",
-        stage_id: stages[0]?.id ?? null,
+        stage_id: entryStageId,
         source: null,
         project_interest: "",
         acquired_date: todayDateInput(),
@@ -147,14 +149,14 @@ export function LeadForm({ open, onOpenChange, lead }: LeadFormProps) {
       setCustomData({});
       setDuplicateLead(null);
     }
-  }, [lead, open, reset, stages]);
+  }, [lead, open, reset, entryStageId]);
 
   useEffect(() => {
     if (!open || lead) return;
-    if (!stageId && stages[0]?.id) {
-      setValue("stage_id", stages[0].id);
+    if (!stageId && entryStageId) {
+      setValue("stage_id", entryStageId);
     }
-  }, [open, lead, stageId, stages, setValue]);
+  }, [open, lead, stageId, entryStageId, setValue]);
 
   useEffect(() => {
     if (!open) return;
@@ -188,7 +190,7 @@ export function LeadForm({ open, onOpenChange, lead }: LeadFormProps) {
         phone,
         alt_phone: assigned.alt,
         email: values.email?.trim() || null,
-        stage_id: values.stage_id || stages[0]?.id || null,
+        stage_id: values.stage_id || entryStageId,
         source: values.source || null,
         project_interest: values.project_interest?.trim() || null,
         acquired_date: values.acquired_date?.trim() || null,
@@ -278,6 +280,7 @@ export function LeadForm({ open, onOpenChange, lead }: LeadFormProps) {
             )}
           </div>
 
+          {!lead && (
           <div className="flex flex-col gap-2">
             <Label>Stage</Label>
             <Select
@@ -296,6 +299,7 @@ export function LeadForm({ open, onOpenChange, lead }: LeadFormProps) {
               </SelectContent>
             </Select>
           </div>
+          )}
 
           <div className="flex flex-col gap-2">
             <Label>Source</Label>

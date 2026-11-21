@@ -48,18 +48,21 @@ export interface Database {
           label: string;
           color: string;
           sort_order: number;
+          kind: string;
         };
         Insert: {
           id?: string;
           label: string;
           color: string;
           sort_order?: number;
+          kind?: string;
         };
         Update: {
           id?: string;
           label?: string;
           color?: string;
           sort_order?: number;
+          kind?: string;
         };
         Relationships: [];
       };
@@ -157,6 +160,9 @@ export interface Database {
           linked_unit_id: string | null;
           acquired_date: string | null;
           custom_data: Json;
+          call_attempts: number;
+          last_contacted_at: string | null;
+          close_reason: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -172,6 +178,9 @@ export interface Database {
           linked_unit_id?: string | null;
           acquired_date?: string | null;
           custom_data?: Json;
+          call_attempts?: number;
+          last_contacted_at?: string | null;
+          close_reason?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -187,6 +196,9 @@ export interface Database {
           linked_unit_id?: string | null;
           acquired_date?: string | null;
           custom_data?: Json;
+          call_attempts?: number;
+          last_contacted_at?: string | null;
+          close_reason?: string | null;
           created_at?: string;
           updated_at?: string;
         };
