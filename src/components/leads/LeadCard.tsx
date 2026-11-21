@@ -5,7 +5,7 @@ import { AlertCircle } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { StageBadge } from "@/components/shared/StatusBadge";
 import { useFieldDefinitions } from "@/lib/queries/fieldDefinitions";
-import { cn, formatDisplayDate, formatPhone, formatRelativeDate } from "@/lib/utils";
+import { cn, formatBudget, formatDisplayDate, formatPhone, formatRelativeDate } from "@/lib/utils";
 import type { Lead } from "@/types";
 
 interface LeadCardProps {
@@ -91,7 +91,7 @@ export function LeadCard({
             const val = lead.custom_data[field.field_key];
             if (val == null || val === "") return null;
             const display =
-              field.field_key === "budget" ? `₹${val} Cr` : String(val);
+              field.field_key === "budget" ? formatBudget(val) : String(val);
             return (
               <div key={field.id} className="flex justify-between text-xs">
                 <span className="text-muted-foreground">{field.label}</span>

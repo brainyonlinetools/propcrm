@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { useFieldDefinitions } from "@/lib/queries/fieldDefinitions";
-import { formatCurrency } from "@/lib/utils";
+import { formatBudget, formatCurrency } from "@/lib/utils";
 import type { EntityType } from "@/types";
 
 interface DynamicFieldRendererProps {
@@ -31,10 +31,7 @@ function formatFieldValue(
   if (val == null || val === "") return "—";
   if (fieldType === "boolean") return val ? "Yes" : "No";
   if (fieldType === "multiselect" && Array.isArray(val)) return val.join(", ");
-  if (fieldType === "number" && fieldKey === "budget") {
-    const num = Number(val);
-    if (!Number.isNaN(num)) return `₹${num} Cr`;
-  }
+  if (fieldKey === "budget") return formatBudget(val) || "—";
   if (fieldType === "number" && fieldKey === "price") {
     return formatCurrency(Number(val));
   }

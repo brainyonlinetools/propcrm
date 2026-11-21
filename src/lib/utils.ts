@@ -95,3 +95,15 @@ export function setAgentName(name: string): void {
   if (typeof window === "undefined") return;
   localStorage.setItem(AGENT_NAME_KEY, name);
 }
+
+/**
+ * Display a lead budget. Plain numbers are treated as ₹ Cr (legacy format);
+ * any other text ("2-3 Cr", "Flexible") is shown exactly as entered.
+ */
+export function formatBudget(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "number") return Number.isFinite(value) ? `₹${value} Cr` : "";
+  const text = String(value).trim();
+  if (text === "") return "";
+  return /^\d+(\.\d+)?$/.test(text) ? `₹${text} Cr` : text;
+}
