@@ -3,12 +3,23 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Copy, Mic, Pencil, Trash2 } from "lucide-react";
+import { ClipboardCheck, Copy, Mic, MoreVertical, Pencil, Trash2 } from "lucide-react";
 import { VoiceNoteSheet } from "@/components/leads/VoiceNoteSheet";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { BackButton } from "@/components/shared/BackButton";
+import { DateChips } from "@/components/shared/DateChips";
+import { CallQueueSheet } from "@/components/shared/CallQueueSheet";
+import { buildCallContacts, useLeadCalling } from "@/components/leads/useLeadCalling";
 import {
   Select,
   SelectContent,
@@ -38,7 +49,6 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { DynamicFieldRenderer } from "@/components/shared/DynamicFieldRenderer";
 import { useStageChangeFlow } from "@/components/leads/StageChangeSheet";
@@ -89,6 +99,9 @@ export function LeadDetailPanel({ id, embedded = false, onDeleted }: LeadDetailP
   const [taskTime, setTaskTime] = useState("");
   const [unitSearchOpen, setUnitSearchOpen] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
+  const [outcomeOpen, setOutcomeOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const { logOutcome, followUpForOutcome } = useLeadCalling();
 
   if (isLoading) {
     return (
@@ -171,16 +184,29 @@ export function LeadDetailPanel({ id, embedded = false, onDeleted }: LeadDetailP
   }
 
   async function handleLinkUnit(unitId: string | null) {
+    const previous = lead!.linked_unit_id;
     try {
       await updateLead.mutateAsync({ id: lead!.id, linked_unit_id: unitId });
       setUnitSearchOpen(false);
-      toast.success(unitId ? "Unit linked" : "Unit unlinked");
+      if (unitId) {
+        toast.success("Unit linked");
+      } else {
+        toast("Unit unlinked", {
+          action: previous
+            ? {
+                label: "Undo",
+                onClick: () => updateLead.mutate({ id: lead!.id, linked_unit_id: previous }),
+              }
+            : undefined,
+        });
+      }
     } catch {
       toast.error("Failed to update linked unit");
     }
   }
 
   async function handleDelete() {
+    setDeleting(true);
     try {
       await deleteLead.mutateAsync(id);
       toast.success("Lead deleted");
@@ -191,29 +217,45 @@ export function LeadDetailPanel({ id, embedded = false, onDeleted }: LeadDetailP
       }
     } catch {
       toast.error("Failed to delete lead");
+    } finally {
+      setDeleting(false);
     }
   }
 
+  const primary = contactNumbers[0]?.phone ?? null;
+  const outcomeContacts = buildCallContacts([lead]).slice(0, 1);
+
   return (
-    <div className="flex flex-col gap-6 p-4">
-      <div className="flex items-center gap-2">
-        {!embedded && (
-          <Button asChild variant="ghost" size="icon">
-            <Link href="/leads">
-              <ArrowLeft />
-            </Link>
-          </Button>
-        )}
+    <div className="flex flex-col gap-4 p-4">
+      <div className="flex items-center gap-1">
+        {!embedded && <BackButton fallbackHref="/leads" />}
         <h1 className="min-w-0 flex-1 truncate text-lg font-semibold">{lead.name}</h1>
-        <Button variant="ghost" size="icon" onClick={() => setEditOpen(true)}>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-11"
+          aria-label="Edit lead"
+          onClick={() => setEditOpen(true)}
+        >
           <Pencil />
         </Button>
-        <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-          <AlertDialogTrigger asChild>
-            <Button variant="ghost" size="icon" aria-label="Delete lead">
-              <Trash2 className="text-destructive" />
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="size-11" aria-label="More actions">
+              <MoreVertical />
             </Button>
-          </AlertDialogTrigger>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem
+              className="h-11 text-destructive focus:text-destructive"
+              onSelect={() => setDeleteOpen(true)}
+            >
+              <Trash2 className="mr-2 size-4" />
+              Delete lead
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
           <AlertDialogContent size="sm">
             <AlertDialogHeader>
               <AlertDialogTitle>Delete lead?</AlertDialogTitle>
@@ -222,9 +264,16 @@ export function LeadDetailPanel({ id, embedded = false, onDeleted }: LeadDetailP
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction variant="destructive" onClick={handleDelete}>
-                Delete
+              <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                variant="destructive"
+                disabled={deleting}
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleDelete();
+                }}
+              >
+                {deleting ? "Deleting…" : "Delete"}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
@@ -232,34 +281,6 @@ export function LeadDetailPanel({ id, embedded = false, onDeleted }: LeadDetailP
       </div>
 
       <section className="flex flex-col gap-3">
-        {contactNumbers.map(({ phone, label }, index) => (
-          <div key={`${phone}-${index}`} className="flex flex-col gap-2">
-            <button
-              type="button"
-              onClick={() => copyPhone(phone)}
-              className="flex items-center gap-2 text-left text-sm text-muted-foreground"
-            >
-              {label ? `${label} · ` : ""}
-              {formatPhone(phone)}
-              <Copy className="size-3.5" />
-            </button>
-            <div className="flex gap-2">
-              <CallButton phone={phone} leadId={lead.id} className="flex-1" />
-              <WhatsAppButton lead={lead} phone={phone} className="flex-1" />
-            </div>
-          </div>
-        ))}
-
-        <Button
-          type="button"
-          variant="outline"
-          className="h-12 w-full gap-2"
-          onClick={() => setVoiceOpen(true)}
-        >
-          <Mic className="size-4" />
-          Voice note
-        </Button>
-
         <div className="flex flex-wrap items-center gap-2">
           {lead.pipeline_stages && (
             <StageBadge
@@ -268,7 +289,10 @@ export function LeadDetailPanel({ id, embedded = false, onDeleted }: LeadDetailP
             />
           )}
           <Select value={lead.stage_id ?? ""} onValueChange={handleStageChange}>
-            <SelectTrigger className="h-9 w-full min-w-0 max-w-full gap-1 border-none px-2 text-xs shadow-none sm:w-auto">
+            <SelectTrigger
+              aria-label="Change stage"
+              className="h-11 w-full min-w-0 max-w-full gap-1 px-3 text-sm sm:w-auto"
+            >
               <SelectValue placeholder="Change stage" />
             </SelectTrigger>
             <SelectContent>
@@ -281,183 +305,272 @@ export function LeadDetailPanel({ id, embedded = false, onDeleted }: LeadDetailP
           </Select>
         </div>
         {lead.close_reason && (
-          <p className="mt-2 text-xs text-muted-foreground">Reason: {lead.close_reason}</p>
+          <p className="text-xs text-muted-foreground">Reason: {lead.close_reason}</p>
         )}
-      </section>
 
-      <section className="rounded-lg border border-border bg-card p-4 shadow-card">
-        <h2 className="mb-3 text-sm font-semibold">Details</h2>
-        <div className="mb-4 flex flex-col gap-2 text-sm">
-          {lead.source && (
-            <div className="flex flex-wrap justify-between gap-x-4 gap-y-1">
-              <span className="shrink-0 text-muted-foreground">Source</span>
-              <span className="min-w-0 text-right break-words">{lead.source}</span>
-            </div>
-          )}
-          {lead.project_interest && (
-            <div className="flex flex-wrap justify-between gap-x-4 gap-y-1">
-              <span className="shrink-0 text-muted-foreground">Project Interest</span>
-              <span className="min-w-0 text-right break-words">{lead.project_interest}</span>
-            </div>
-          )}
-          {lead.acquired_date && (
-            <div className="flex flex-wrap justify-between gap-x-4 gap-y-1">
-              <span className="shrink-0 text-muted-foreground">Lead Date</span>
-              <span className="min-w-0 text-right break-words">
-                {formatDisplayDate(lead.acquired_date)}
-              </span>
-            </div>
-          )}
-          {lead.email && (
-            <div className="flex flex-wrap justify-between gap-x-4 gap-y-1">
-              <span className="shrink-0 text-muted-foreground">Email</span>
-              <span className="min-w-0 text-right break-all">{lead.email}</span>
-            </div>
-          )}
-        </div>
-        <DynamicFieldRenderer
-          entityType="lead"
-          value={lead.custom_data}
-          onChange={() => {}}
-          mode="view"
-        />
-      </section>
-
-      <section className="rounded-lg border border-border bg-card p-4 shadow-card">
-        <h2 className="mb-3 text-sm font-semibold">Linked Unit</h2>
-        {linkedUnit ? (
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <Link
-              href={`/inventory/${linkedUnit.id}`}
-              className="min-w-0 text-sm text-brand-accent break-words hover:underline"
-            >
-              {linkedUnit.unit_number} — {linkedUnit.projects?.name}
-            </Link>
-            <Button variant="ghost" size="sm" onClick={() => handleLinkUnit(null)}>
-              Unlink
-            </Button>
-          </div>
-        ) : (
-          <Popover open={unitSearchOpen} onOpenChange={setUnitSearchOpen}>
-            <PopoverTrigger asChild>
-              <Button variant="outline" className="w-full">
-                Search & link unit
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-[min(20rem,calc(100vw-2rem))] p-0" align="start">
-              <Command>
-                <CommandInput placeholder="Search units…" />
-                <CommandList>
-                  <CommandEmpty>No units found</CommandEmpty>
-                  <CommandGroup>
-                    {inventory.map((unit) => (
-                      <CommandItem
-                        key={unit.id}
-                        value={`${unit.unit_number} ${unit.projects?.name}`}
-                        onSelect={() => handleLinkUnit(unit.id)}
-                      >
-                        {unit.unit_number} — {unit.projects?.name ?? "No project"}
-                      </CommandItem>
-                    ))}
-                  </CommandGroup>
-                </CommandList>
-              </Command>
-            </PopoverContent>
-          </Popover>
-        )}
-      </section>
-
-      <section className="rounded-lg border border-border bg-card p-4 shadow-card">
-        <h2 className="mb-3 text-sm font-semibold">Tasks</h2>
-        <div className="mb-3 flex flex-col gap-2">
-          {tasks.map((task) => (
-            <TaskItem key={task.id} task={task} showLead={false} />
-          ))}
-          {tasks.length === 0 && (
-            <p className="text-sm text-muted-foreground">No tasks yet</p>
-          )}
-        </div>
-        <div className="flex flex-col gap-2 border-t border-border pt-3">
-          <Input
-            placeholder="Task title"
-            className="h-12"
-            value={taskTitle}
-            onChange={(e) => setTaskTitle(e.target.value)}
-          />
-          <Input
-            type="date"
-            className="h-12"
-            value={taskDue}
-            onChange={(e) => setTaskDue(e.target.value)}
-          />
-          {taskDue && (
-            <div className="flex flex-col gap-1">
-              <Input
-                type="time"
-                className="h-12"
-                value={taskTime}
-                placeholder="09:00"
-                onChange={(e) => setTaskTime(e.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">
-                Reminder time (optional, defaults to 9:00 AM IST)
-              </p>
-            </div>
-          )}
-          <Button onClick={handleAddTask} disabled={!taskTitle.trim()}>
-            Add Task
-          </Button>
-        </div>
-      </section>
-
-      <section className="rounded-lg border border-border bg-card p-4 shadow-card">
-        <h2 className="mb-3 text-sm font-semibold">Activity</h2>
-        <div className="flex flex-col gap-3">
-          {notes.map((note) => (
-            <div key={note.id} className="flex gap-2 border-b border-border pb-3 last:border-0">
-              <span className="text-base">{NOTE_TYPE_CONFIG[note.note_type].icon}</span>
-              <div className="flex-1">
-                <p className="text-sm">{note.content}</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {formatRelativeDate(note.created_at)}
-                </p>
+        {contactNumbers.length > 1 &&
+          contactNumbers.slice(1).map(({ phone, label }, index) => (
+            <div key={`${phone}-${index}`} className="flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => copyPhone(phone)}
+                className="flex h-11 items-center gap-2 text-left text-sm text-muted-foreground"
+              >
+                {label ? `${label} · ` : ""}
+                {formatPhone(phone)}
+                <Copy className="size-3.5" />
+              </button>
+              <div className="flex gap-2">
+                <CallButton phone={phone} leadId={lead.id} className="flex-1" />
+                <WhatsAppButton lead={lead} phone={phone} className="h-12 flex-1" />
               </div>
             </div>
           ))}
-          {notes.length === 0 && (
-            <p className="text-sm text-muted-foreground">No activity yet</p>
-          )}
-        </div>
-        <div className="mt-3 flex flex-col gap-2 border-t border-border pt-3">
-          <div className="flex gap-2">
-            {(Object.keys(NOTE_TYPE_CONFIG) as NoteType[]).map((type) => (
-              <Button
-                key={type}
-                type="button"
-                variant={noteType === type ? "secondary" : "ghost"}
-                size="sm"
-                onClick={() => setNoteType(type)}
-              >
-                {NOTE_TYPE_CONFIG[type].icon}
-              </Button>
-            ))}
-          </div>
-          <Input
-            placeholder="Add a note…"
-            className="h-12"
-            value={noteContent}
-            onChange={(e) => setNoteContent(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleAddNote()}
-          />
-          <Button onClick={handleAddNote} disabled={!noteContent.trim()}>
-            Save Note
-          </Button>
-        </div>
+        {primary && (
+          <button
+            type="button"
+            onClick={() => copyPhone(primary)}
+            aria-label={`Copy ${formatPhone(primary)}`}
+            className="flex h-11 items-center gap-2 text-left text-sm text-muted-foreground"
+          >
+            {formatPhone(primary)}
+            <Copy className="size-3.5" />
+          </button>
+        )}
       </section>
 
+      <Tabs defaultValue="overview" className="gap-4">
+        <TabsList className="grid h-11 w-full grid-cols-3">
+          <TabsTrigger value="overview" className="h-9">Overview</TabsTrigger>
+          <TabsTrigger value="tasks" className="h-9">
+            Tasks{tasks.filter((t) => !t.is_done).length > 0 && ` (${tasks.filter((t) => !t.is_done).length})`}
+          </TabsTrigger>
+          <TabsTrigger value="activity" className="h-9">Activity</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview" className="flex flex-col gap-4">
+          <section className="rounded-lg border border-border bg-card p-4 shadow-card">
+            <h2 className="mb-3 text-sm font-semibold">Details</h2>
+            <div className="mb-4 flex flex-col gap-2 text-sm">
+              {lead.source && (
+                <div className="flex flex-wrap justify-between gap-x-4 gap-y-1">
+                  <span className="shrink-0 text-muted-foreground">Source</span>
+                  <span className="min-w-0 text-right break-words">{lead.source}</span>
+                </div>
+              )}
+              {lead.project_interest && (
+                <div className="flex flex-wrap justify-between gap-x-4 gap-y-1">
+                  <span className="shrink-0 text-muted-foreground">Project Interest</span>
+                  <span className="min-w-0 text-right break-words">{lead.project_interest}</span>
+                </div>
+              )}
+              {lead.acquired_date && (
+                <div className="flex flex-wrap justify-between gap-x-4 gap-y-1">
+                  <span className="shrink-0 text-muted-foreground">Lead Date</span>
+                  <span className="min-w-0 text-right break-words">
+                    {formatDisplayDate(lead.acquired_date)}
+                  </span>
+                </div>
+              )}
+              {lead.email && (
+                <div className="flex flex-wrap justify-between gap-x-4 gap-y-1">
+                  <span className="shrink-0 text-muted-foreground">Email</span>
+                  <span className="min-w-0 text-right break-all">{lead.email}</span>
+                </div>
+              )}
+            </div>
+            <DynamicFieldRenderer
+              entityType="lead"
+              value={lead.custom_data}
+              onChange={() => {}}
+              mode="view"
+            />
+          </section>
+
+          <section className="rounded-lg border border-border bg-card p-4 shadow-card">
+            <h2 className="mb-3 text-sm font-semibold">Linked Unit</h2>
+            {linkedUnit ? (
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <Link
+                  href={`/inventory/${linkedUnit.id}`}
+                  className="min-w-0 text-sm text-brand-accent break-words hover:underline"
+                >
+                  {linkedUnit.unit_number} — {linkedUnit.projects?.name}
+                </Link>
+                <Button variant="ghost" className="h-11" onClick={() => handleLinkUnit(null)}>
+                  Unlink
+                </Button>
+              </div>
+            ) : (
+              <Popover open={unitSearchOpen} onOpenChange={setUnitSearchOpen}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="h-12 w-full">
+                    Search & link unit
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[min(20rem,calc(100vw-2rem))] p-0" align="start">
+                  <Command>
+                    <CommandInput placeholder="Search units…" />
+                    <CommandList>
+                      <CommandEmpty>No units found</CommandEmpty>
+                      <CommandGroup>
+                        {inventory.map((unit) => (
+                          <CommandItem
+                            key={unit.id}
+                            value={`${unit.unit_number} ${unit.projects?.name}`}
+                            onSelect={() => handleLinkUnit(unit.id)}
+                          >
+                            {unit.unit_number} — {unit.projects?.name ?? "No project"}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+            )}
+          </section>
+        </TabsContent>
+
+        <TabsContent value="tasks">
+          <section className="rounded-lg border border-border bg-card p-4 shadow-card">
+            <div className="mb-3 flex flex-col gap-2">
+              <Input
+                placeholder="New task, e.g. Send brochure"
+                className="h-12"
+                value={taskTitle}
+                enterKeyHint="done"
+                autoComplete="off"
+                onChange={(e) => setTaskTitle(e.target.value)}
+              />
+              <DateChips value={taskDue} onChange={setTaskDue} />
+              <Input
+                type="date"
+                aria-label="Due date"
+                className="h-12"
+                value={taskDue}
+                onChange={(e) => setTaskDue(e.target.value)}
+              />
+              {taskDue && (
+                <div className="flex flex-col gap-1">
+                  <Input
+                    type="time"
+                    aria-label="Reminder time"
+                    className="h-12"
+                    value={taskTime}
+                    onChange={(e) => setTaskTime(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Reminder time (optional, defaults to 9:00 AM IST)
+                  </p>
+                </div>
+              )}
+              <Button className="h-12" onClick={handleAddTask} disabled={!taskTitle.trim()}>
+                Add Task
+              </Button>
+            </div>
+            <div className="flex flex-col gap-2 border-t border-border pt-3">
+              {tasks.map((task) => (
+                <TaskItem key={task.id} task={task} showLead={false} />
+              ))}
+              {tasks.length === 0 && (
+                <p className="text-sm text-muted-foreground">No tasks yet</p>
+              )}
+            </div>
+          </section>
+        </TabsContent>
+
+        <TabsContent value="activity">
+          <section className="rounded-lg border border-border bg-card p-4 shadow-card">
+            <div className="flex flex-col gap-2">
+              <div className="flex gap-2">
+                {(Object.keys(NOTE_TYPE_CONFIG) as NoteType[]).map((type) => (
+                  <Button
+                    key={type}
+                    type="button"
+                    variant={noteType === type ? "secondary" : "ghost"}
+                    className="h-11 min-w-11 flex-1"
+                    aria-label={NOTE_TYPE_CONFIG[type].label}
+                    aria-pressed={noteType === type}
+                    onClick={() => setNoteType(type)}
+                  >
+                    {NOTE_TYPE_CONFIG[type].icon}
+                  </Button>
+                ))}
+              </div>
+              <Input
+                placeholder="Add a note…"
+                className="h-12"
+                value={noteContent}
+                enterKeyHint="send"
+                autoComplete="off"
+                onChange={(e) => setNoteContent(e.target.value)}
+                onKeyDown={(e) =>
+                  e.key === "Enter" && !e.nativeEvent.isComposing && handleAddNote()
+                }
+              />
+              <Button className="h-12" onClick={handleAddNote} disabled={!noteContent.trim()}>
+                Save Note
+              </Button>
+            </div>
+            <div className="mt-3 flex flex-col gap-3 border-t border-border pt-3">
+              {notes.map((note) => (
+                <div key={note.id} className="flex gap-2 border-b border-border pb-3 last:border-0">
+                  <span className="text-base">{NOTE_TYPE_CONFIG[note.note_type].icon}</span>
+                  <div className="flex-1">
+                    <p className="text-sm whitespace-pre-wrap">{note.content}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {formatRelativeDate(note.created_at)}
+                    </p>
+                  </div>
+                </div>
+              ))}
+              {notes.length === 0 && (
+                <p className="text-sm text-muted-foreground">No activity yet</p>
+              )}
+            </div>
+          </section>
+        </TabsContent>
+      </Tabs>
+
+      {/* Primary actions stay reachable while scrolling (sits above the bottom nav on phones) */}
+      <div className="sticky bottom-[calc(4rem+env(safe-area-inset-bottom))] z-30 -mx-4 flex items-center gap-2 border-t border-border bg-background/95 px-4 py-2 backdrop-blur-sm md:bottom-0">
+        {primary && <CallButton phone={primary} leadId={lead.id} className="flex-1" />}
+        {primary && <WhatsAppButton lead={lead} phone={primary} className="h-12 flex-1" />}
+        <Button
+          type="button"
+          variant="outline"
+          className="size-12 shrink-0"
+          aria-label="Voice note"
+          onClick={() => setVoiceOpen(true)}
+        >
+          <Mic />
+        </Button>
+        {primary && (
+          <Button
+            type="button"
+            variant="outline"
+            className="size-12 shrink-0"
+            aria-label="Log call outcome"
+            onClick={() => setOutcomeOpen(true)}
+          >
+            <ClipboardCheck />
+          </Button>
+        )}
+      </div>
+
       <LeadForm open={editOpen} onOpenChange={setEditOpen} lead={lead} />
-      {stageDialog}
       <VoiceNoteSheet lead={lead} open={voiceOpen} onOpenChange={setVoiceOpen} />
+      <CallQueueSheet
+        open={outcomeOpen}
+        onOpenChange={setOutcomeOpen}
+        mode="single"
+        title={`Log call · ${lead.name}`}
+        contacts={outcomeContacts}
+        onLogOutcome={logOutcome}
+        followUp={followUpForOutcome}
+      />
+      {stageDialog}
     </div>
   );
 }

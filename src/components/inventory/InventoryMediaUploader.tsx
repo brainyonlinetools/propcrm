@@ -68,6 +68,7 @@ export function InventoryMediaUploader({ unit }: InventoryMediaUploaderProps) {
   }
 
   async function handleDelete(item: InventoryMedia) {
+    if (!window.confirm("Delete this file? This cannot be undone.")) return;
     try {
       await deleteMedia.mutateAsync(item);
       toast.success("Media deleted");

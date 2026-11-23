@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import type { InventoryNote, LeadNote, NoteType, Task } from "@/types";
 import { leadsKey, qualifiedLeadsKey } from "./leads";
@@ -82,9 +83,32 @@ export function useToggleTask() {
       if (error) throw error;
       return { data, lead_id };
     },
-    onSuccess: (result) => {
+    // Update the UI immediately; roll back if the server rejects it.
+    onMutate: async ({ id, is_done }) => {
+      await queryClient.cancelQueries({ queryKey: ["tasks"] });
+      const snapshots = queryClient.getQueriesData<Task[]>({ queryKey: ["tasks"] });
+      snapshots.forEach(([key, old]) => {
+        if (!Array.isArray(old)) return;
+        // Global list without completed tasks: ticking removes the row.
+        const filter = key[1] as { includeDone?: boolean } | string | undefined;
+        const hidesDone =
+          typeof filter === "object" && filter !== null && filter.includeDone === false;
+        queryClient.setQueryData<Task[]>(
+          key,
+          old.flatMap((t) =>
+            t.id !== id ? [t] : is_done && hidesDone ? [] : [{ ...t, is_done }]
+          )
+        );
+      });
+      return { snapshots };
+    },
+    onError: (_err, _vars, ctx) => {
+      toast.error("Couldn't update task. Check your connection.");
+      ctx?.snapshots.forEach(([key, data]) => queryClient.setQueryData(key, data));
+    },
+    onSettled: (_data, _err, vars) => {
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
-      queryClient.invalidateQueries({ queryKey: leadTasksKey(result.lead_id) });
+      queryClient.invalidateQueries({ queryKey: leadTasksKey(vars.lead_id) });
     },
   });
 }

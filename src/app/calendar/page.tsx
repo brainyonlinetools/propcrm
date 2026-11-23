@@ -90,7 +90,7 @@ export default function CalendarPage() {
           <div className="rounded-lg border border-dashed border-border bg-card p-8 text-center">
             <h2 className="text-base font-semibold">Could not load calendar</h2>
             <p className="mt-2 text-sm text-muted-foreground">
-              Check your Supabase connection.
+              Check your internet connection and pull down to retry.
             </p>
             <Button className="mt-4" onClick={handleRefresh}>
               Try again

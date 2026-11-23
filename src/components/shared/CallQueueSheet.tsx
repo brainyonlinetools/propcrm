@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { addDays, format } from "date-fns";
-import { Check, Phone, SkipForward } from "lucide-react";
+import { Check, ChevronLeft, Phone, SkipForward, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -47,6 +47,10 @@ interface CallQueueSheetProps {
   ) => Promise<void>;
   /** Return a prompt to show after this outcome, or null to go straight to the next contact. */
   followUp?: (contact: CallQueueContact, outcome: CallOutcome) => FollowUpPrompt | null;
+  /** "single" = log one call and close (no queue counters / up next). */
+  mode?: "queue" | "single";
+  /** Called when the sheet closes after finishing (or abandoning) the queue. */
+  onClosed?: (info: { logged: number }) => void;
 }
 
 const OUTCOMES = Object.keys(CALL_OUTCOME_LABELS) as CallOutcome[];
@@ -62,7 +66,10 @@ export function CallQueueSheet({
   contacts,
   onLogOutcome,
   followUp,
+  mode = "queue",
+  onClosed,
 }: CallQueueSheetProps) {
+  const single = mode === "single";
   const [index, setIndex] = useState(0);
   const [logged, setLogged] = useState(0);
   const [note, setNote] = useState("");
@@ -70,6 +77,9 @@ export function CallQueueSheet({
   const [confirmingCallback, setConfirmingCallback] = useState(false);
   const [saving, setSaving] = useState(false);
   const [prompt, setPrompt] = useState<FollowUpPrompt | null>(null);
+  const [showNote, setShowNote] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const loggedRef = useRef(0);
 
   useEffect(() => {
     if (open) {
@@ -80,8 +90,16 @@ export function CallQueueSheet({
       setConfirmingCallback(false);
       setSaving(false);
       setPrompt(null);
+      setShowNote(false);
+      setError(null);
+      loggedRef.current = 0;
     }
-  }, [open ]);
+  }, [open]);
+
+  function handleOpenChange(next: boolean) {
+    if (!next) onClosed?.({ logged: loggedRef.current });
+    onOpenChange(next);
+  }
 
   const current = contacts[index] ?? null;
   const finished = index >= contacts.length;
@@ -89,6 +107,11 @@ export function CallQueueSheet({
 
   function advance() {
     setPrompt(null);
+    setError(null);
+    if (single) {
+      handleOpenChange(false);
+      return;
+    }
     setIndex((i) => i + 1);
     setNote("");
     setCallbackDate(defaultCallbackDate());
@@ -102,11 +125,13 @@ export function CallQueueSheet({
       return;
     }
     setSaving(true);
+    setError(null);
     try {
       await onLogOutcome(current, outcome, {
         note: note.trim() || undefined,
         followUpDate: outcome === "callback" ? callbackDate : undefined,
       });
+      loggedRef.current += 1;
       setLogged((n) => n + 1);
       const next = followUp?.(current, outcome) ?? null;
       if (next) {
@@ -114,13 +139,15 @@ export function CallQueueSheet({
       } else {
         advance();
       }
+    } catch {
+      setError("Couldn't save this call. Check your connection and tap an outcome again.");
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet open={open} onOpenChange={handleOpenChange}>
       <SheetContent
         side="bottom"
         className="flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-xl px-0"
@@ -128,9 +155,11 @@ export function CallQueueSheet({
         <SheetHeader className="shrink-0 px-4">
           <SheetTitle>{title}</SheetTitle>
           <SheetDescription>
-            {finished
-              ? "Queue complete"
-              : `Contact ${Math.min(index + 1, contacts.length)} of ${contacts.length} · ${logged} logged`}
+            {single
+              ? "How did the call go?"
+              : finished
+                ? "Queue complete"
+                : `Contact ${Math.min(index + 1, contacts.length)} of ${contacts.length} · ${logged} logged`}
           </SheetDescription>
         </SheetHeader>
 
@@ -144,7 +173,7 @@ export function CallQueueSheet({
               <p className="mt-1 text-sm text-muted-foreground">
                 {logged} of {contacts.length} contact{contacts.length !== 1 ? "s" : ""} logged.
               </p>
-              <Button className="mt-4" onClick={() => onOpenChange(false)}>
+              <Button className="mt-4 h-12" onClick={() => handleOpenChange(false)}>
                 Done
               </Button>
             </div>
@@ -162,19 +191,34 @@ export function CallQueueSheet({
                   </p>
                 )}
                 <div className="mt-3 flex gap-2">
-                  <Button asChild size="lg" className="flex-1">
+                  <Button asChild size="lg" className="h-12 flex-1">
                     <a href={`tel:${phoneToTel(current.phone)}`}>
                       <Phone data-icon="inline-start" />
                       Call now
                     </a>
                   </Button>
+                  {!single && index > 0 && (
+                    <Button
+                      size="lg"
+                      variant="outline"
+                      className="h-12"
+                      onClick={() => {
+                        setPrompt(null);
+                        setIndex((i) => Math.max(0, i - 1));
+                      }}
+                      aria-label="Previous contact"
+                    >
+                      <ChevronLeft />
+                    </Button>
+                  )}
                   <Button
                     size="lg"
                     variant="outline"
+                    className="h-12"
                     onClick={advance}
-                    aria-label="Skip without logging"
+                    aria-label={single ? "Close without logging" : "Skip without logging"}
                   >
-                    <SkipForward />
+                    {single ? <X /> : <SkipForward />}
                   </Button>
                 </div>
               </div>
@@ -194,20 +238,32 @@ export function CallQueueSheet({
                 </div>
               ) : (
               <>
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="call-queue-note">Note (optional)</Label>
-                <Input
-                  id="call-queue-note"
-                  placeholder="e.g. asked for 3BHK floor plan"
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  className="h-12"
-                />
-              </div>
+              {error && (
+                <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+                  {error}
+                </p>
+              )}
 
               {confirmingCallback && (
                 <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/30 p-3">
                   <Label htmlFor="call-queue-callback">Call back on</Label>
+                  <div className="flex gap-2">
+                    {[
+                      { label: "Tomorrow", days: 1 },
+                      { label: "+3 days", days: 3 },
+                      { label: "+1 week", days: 7 },
+                    ].map(({ label, days }) => (
+                      <Button
+                        key={label}
+                        type="button"
+                        variant={callbackDate === format(addDays(new Date(), days), "yyyy-MM-dd") ? "secondary" : "outline"}
+                        className="h-11 flex-1"
+                        onClick={() => setCallbackDate(format(addDays(new Date(), days), "yyyy-MM-dd"))}
+                      >
+                        {label}
+                      </Button>
+                    ))}
+                  </div>
                   <Input
                     id="call-queue-callback"
                     type="date"
@@ -248,7 +304,7 @@ export function CallQueueSheet({
                       <Button
                         key={outcome}
                         variant="outline"
-                        className="h-11 justify-start"
+                        className="h-12 justify-start"
                         onClick={() => handleOutcome(outcome)}
                         disabled={saving}
                       >
@@ -258,10 +314,30 @@ export function CallQueueSheet({
                   </div>
                 )}
               </div>
+
+              {!confirmingCallback &&
+                (showNote ? (
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="call-queue-note">Note (saved with the outcome you tap above)</Label>
+                    <Input
+                      id="call-queue-note"
+                      placeholder="e.g. asked for 3BHK floor plan"
+                      value={note}
+                      onChange={(e) => setNote(e.target.value)}
+                      className="h-12"
+                      autoComplete="off"
+                      enterKeyHint="done"
+                    />
+                  </div>
+                ) : (
+                  <Button type="button" variant="ghost" className="h-11 justify-start" onClick={() => setShowNote(true)}>
+                    + Add a note
+                  </Button>
+                ))}
               </>
               )}
 
-              {upNext.length > 0 && (
+              {!single && upNext.length > 0 && (
                 <div className="text-sm">
                   <p className="text-xs font-medium text-muted-foreground uppercase">
                     Up next

@@ -54,17 +54,17 @@ export function MonthCalendar({
   return (
     <div className="rounded-lg border border-border bg-card p-3 shadow-card">
       <div className="mb-3 flex items-center justify-between">
-        <Button variant="ghost" size="icon-sm" onClick={onPrevMonth} aria-label="Previous month">
+        <Button variant="ghost" size="icon" className="size-11" onClick={onPrevMonth} aria-label="Previous month">
           <ChevronLeft />
         </Button>
         <button
           type="button"
           onClick={onToday}
-          className="text-sm font-semibold tracking-tight hover:text-brand-accent"
+          className="h-11 px-3 text-sm font-semibold tracking-tight hover:text-brand-accent"
         >
           {format(month, "MMMM yyyy")}
         </button>
-        <Button variant="ghost" size="icon-sm" onClick={onNextMonth} aria-label="Next month">
+        <Button variant="ghost" size="icon" className="size-11" onClick={onNextMonth} aria-label="Next month">
           <ChevronRight />
         </Button>
       </div>

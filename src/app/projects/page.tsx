@@ -149,6 +149,8 @@ export default function ProjectsPage() {
   const listBody = (
     <PullToRefresh
       onRefresh={handleRefresh}
+      restoreKey="projects"
+      restoreReady={!isLoading}
       className={cn("flex-1 px-4 py-4", isDesktop && "overflow-y-auto")}
     >
       {isLoading ? (

@@ -1,4 +1,5 @@
-import Link from "next/link";
+"use client";
+
 import { WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -14,8 +15,8 @@ export default function OfflinePage() {
           Anand Prime CRM needs an internet connection for live lead and inventory data.
         </p>
       </div>
-      <Button asChild>
-        <Link href="/leads">Try again</Link>
+      <Button className="h-12" onClick={() => window.location.reload()}>
+        Try again
       </Button>
     </div>
   );

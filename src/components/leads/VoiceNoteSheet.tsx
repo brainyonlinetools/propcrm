@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2, Mic, Square } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,7 @@ import {
   type VoiceExtraction,
 } from "@/lib/voiceExtract";
 import { DEFAULT_TASK_REMINDER_TIME } from "@/lib/taskReminders";
+import { DateChips } from "@/components/shared/DateChips";
 import type { Lead } from "@/types";
 
 type Phase = "record" | "processing" | "review";
@@ -57,6 +58,17 @@ export function VoiceNoteSheet({ lead, open, onOpenChange }: VoiceNoteSheetProps
   const [transcript, setTranscript] = useState("");
   const [ex, setEx] = useState<VoiceExtraction>(EMPTY);
   const [saving, setSaving] = useState(false);
+  const blobRef = useRef<Blob | null>(null);
+  const savedSteps = useRef({ note: false, lead: false, task: false });
+  const MAX_SECONDS = 180;
+
+  /** Review-phase edits must not vanish on an accidental tap outside. */
+  function requestClose(next: boolean) {
+    if (!next && phase === "review" && !saving) {
+      if (!window.confirm("Discard this voice note?")) return;
+    }
+    onOpenChange(next);
+  }
 
   useEffect(() => {
     if (!open) {
@@ -64,9 +76,46 @@ export function VoiceNoteSheet({ lead, open, onOpenChange }: VoiceNoteSheetProps
       setPhase("record");
       setTranscript("");
       setEx(EMPTY);
+      blobRef.current = null;
+      savedSteps.current = { note: false, lead: false, task: false };
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  async function processAudio(blob: Blob) {
+    setPhase("processing");
+    try {
+      const res = await fetch("/api/voice-note", {
+        method: "POST",
+        headers: {
+          "Content-Type": blob.type || "audio/webm",
+          Authorization: `Bearer ${process.env.NEXT_PUBLIC_VOICE_API_SECRET ?? ""}`,
+        },
+        body: blob,
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      const data = (await res.json()) as {
+        transcript: string;
+        extraction: VoiceExtraction | null;
+      };
+      if (!data.transcript) {
+        toast.error("Couldn't hear anything, try again");
+        blobRef.current = null;
+        setPhase("record");
+        return;
+      }
+      if (!data.extraction) toast.warning("Saved transcript only; extraction failed");
+      blobRef.current = null;
+      setTranscript(data.transcript);
+      setEx(data.extraction ?? EMPTY);
+      setPhase("review");
+    } catch {
+      // Keep the recording so a retry doesn't mean speaking again.
+      blobRef.current = blob;
+      toast.error("Upload failed. Tap Retry to send the same recording.");
+      setPhase("record");
+    }
+  }
 
   async function toggleRecording() {
     if (recorder.state === "recording") {
@@ -75,34 +124,7 @@ export function VoiceNoteSheet({ lead, open, onOpenChange }: VoiceNoteSheetProps
         toast.error("No audio captured");
         return;
       }
-      setPhase("processing");
-      try {
-        const res = await fetch("/api/voice-note", {
-          method: "POST",
-          headers: {
-            "Content-Type": blob.type || "audio/webm",
-            Authorization: `Bearer ${process.env.NEXT_PUBLIC_VOICE_API_SECRET ?? ""}`,
-          },
-          body: blob,
-        });
-        if (!res.ok) throw new Error(String(res.status));
-        const data = (await res.json()) as {
-          transcript: string;
-          extraction: VoiceExtraction | null;
-        };
-        if (!data.transcript) {
-          toast.error("Couldn't hear anything, try again");
-          setPhase("record");
-          return;
-        }
-        if (!data.extraction) toast.warning("Saved transcript only; extraction failed");
-        setTranscript(data.transcript);
-        setEx(data.extraction ?? EMPTY);
-        setPhase("review");
-      } catch {
-        toast.error("Voice note failed. Try again.");
-        setPhase("record");
-      }
+      await processAudio(blob);
       return;
     }
     try {
@@ -126,44 +148,61 @@ export function VoiceNoteSheet({ lead, open, onOpenChange }: VoiceNoteSheetProps
     }
   }
 
+  // Auto-stop long recordings so a forgotten recording can't run on.
+  useEffect(() => {
+    if (recorder.state === "recording" && recorder.seconds >= MAX_SECONDS) {
+      void toggleRecording();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recorder.seconds, recorder.state]);
+
   function set<K extends keyof VoiceExtraction>(key: K, value: string) {
     setEx((prev) => ({ ...prev, [key]: value.trim() ? value : null }));
   }
 
   async function handleSave() {
     setSaving(true);
+    const done = savedSteps.current;
     try {
-      await createNote.mutateAsync({
-        lead_id: lead.id,
-        content: buildNoteContent(ex.summary, transcript),
-        note_type: "call",
-      });
-
-      const customData = mergeCustomData(lead.custom_data as Record<string, unknown>, ex);
-      const changedCustom =
-        JSON.stringify(customData) !== JSON.stringify(lead.custom_data ?? {});
-      const projectChanged =
-        ex.project_interest && ex.project_interest !== lead.project_interest;
-      if (changedCustom || projectChanged) {
-        await updateLead.mutateAsync({
-          id: lead.id,
-          ...(changedCustom ? { custom_data: customData as never } : {}),
-          ...(projectChanged ? { project_interest: ex.project_interest } : {}),
+      if (!done.note) {
+        await createNote.mutateAsync({
+          lead_id: lead.id,
+          content: buildNoteContent(ex.summary, transcript),
+          note_type: "call",
         });
+        done.note = true;
       }
 
-      if (ex.follow_up_date) {
+      if (!done.lead) {
+        const customData = mergeCustomData(lead.custom_data as Record<string, unknown>, ex);
+        const changedCustom =
+          JSON.stringify(customData) !== JSON.stringify(lead.custom_data ?? {});
+        const projectChanged =
+          ex.project_interest && ex.project_interest !== lead.project_interest;
+        if (changedCustom || projectChanged) {
+          await updateLead.mutateAsync({
+            id: lead.id,
+            ...(changedCustom ? { custom_data: customData as never } : {}),
+            ...(projectChanged ? { project_interest: ex.project_interest } : {}),
+          });
+        }
+        done.lead = true;
+      }
+
+      if (ex.follow_up_date && !done.task) {
         await createTask.mutateAsync({
           lead_id: lead.id,
           title: ex.follow_up_title?.trim() || "Follow up",
           due_date: ex.follow_up_date,
           due_time: DEFAULT_TASK_REMINDER_TIME,
         });
+        done.task = true;
       }
       toast.success("Voice note saved");
       onOpenChange(false);
     } catch {
-      toast.error("Failed to save voice note");
+      // Steps already completed are skipped on retry, so nothing is duplicated.
+      toast.error("Some parts failed to save. Tap Save again to finish.");
     } finally {
       setSaving(false);
     }
@@ -172,8 +211,8 @@ export function VoiceNoteSheet({ lead, open, onOpenChange }: VoiceNoteSheetProps
   const recording = recorder.state === "recording";
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="bottom" className="max-h-[92vh] overflow-y-auto">
+    <Sheet open={open} onOpenChange={requestClose}>
+      <SheetContent side="bottom" className="max-h-[92dvh] overflow-y-auto pb-[env(safe-area-inset-bottom)]">
         <SheetHeader>
           <SheetTitle>Voice note · {lead.name}</SheetTitle>
           <SheetDescription>
@@ -201,49 +240,60 @@ export function VoiceNoteSheet({ lead, open, onOpenChange }: VoiceNoteSheetProps
             <p className="text-sm text-muted-foreground">
               {phase === "processing"
                 ? "Transcribing…"
+                : blobRef.current
+                  ? "Upload failed. Tap Retry."
                 : recording
                   ? `Recording ${fmt(recorder.seconds)} · tap to stop`
                   : "Tap to record"}
             </p>
+            {phase === "record" && !recording && blobRef.current && (
+              <Button type="button" className="h-12" onClick={() => processAudio(blobRef.current!)}>
+                Retry upload
+              </Button>
+            )}
+            {recording && (
+              <p className="text-xs text-muted-foreground">Stops automatically at 3 minutes</p>
+            )}
           </div>
         )}
 
         {phase === "review" && (
           <div className="flex flex-col gap-3 px-4 pb-4">
             <div className="flex flex-col gap-1">
-              <Label>Summary</Label>
-              <Textarea value={ex.summary ?? ""} onChange={(e) => set("summary", e.target.value)} />
+              <Label htmlFor="vn-summary">Summary</Label>
+              <Textarea id="vn-summary" value={ex.summary ?? ""} onChange={(e) => set("summary", e.target.value)} />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col gap-1">
-                <Label>Budget</Label>
-                <Input className="h-11" value={ex.budget ?? ""} onChange={(e) => set("budget", e.target.value)} />
+                <Label htmlFor="vn-budget">Budget</Label>
+                <Input id="vn-budget" inputMode="decimal" className="h-11" value={ex.budget ?? ""} onChange={(e) => set("budget", e.target.value)} />
               </div>
               <div className="flex flex-col gap-1">
-                <Label>Configuration</Label>
-                <Input className="h-11" value={ex.configuration ?? ""} onChange={(e) => set("configuration", e.target.value)} />
+                <Label htmlFor="vn-config">Configuration</Label>
+                <Input id="vn-config" className="h-11" value={ex.configuration ?? ""} onChange={(e) => set("configuration", e.target.value)} />
               </div>
               <div className="flex flex-col gap-1">
-                <Label>Project / area</Label>
-                <Input className="h-11" value={ex.project_interest ?? ""} onChange={(e) => set("project_interest", e.target.value)} />
+                <Label htmlFor="vn-project">Project / area</Label>
+                <Input id="vn-project" className="h-11" value={ex.project_interest ?? ""} onChange={(e) => set("project_interest", e.target.value)} />
               </div>
               <div className="flex flex-col gap-1">
-                <Label>Possession</Label>
-                <Input className="h-11" value={ex.possession_preference ?? ""} onChange={(e) => set("possession_preference", e.target.value)} />
+                <Label htmlFor="vn-possession">Possession</Label>
+                <Input id="vn-possession" className="h-11" value={ex.possession_preference ?? ""} onChange={(e) => set("possession_preference", e.target.value)} />
               </div>
             </div>
             <div className="flex flex-col gap-1">
-              <Label>Requirement</Label>
-              <Textarea value={ex.requirement ?? ""} onChange={(e) => set("requirement", e.target.value)} />
+              <Label htmlFor="vn-req">Requirement</Label>
+              <Textarea id="vn-req" value={ex.requirement ?? ""} onChange={(e) => set("requirement", e.target.value)} />
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div className="flex flex-col gap-1">
-                <Label>Follow-up date</Label>
-                <Input type="date" className="h-11" value={ex.follow_up_date ?? ""} onChange={(e) => set("follow_up_date", e.target.value)} />
+              <div className="col-span-2 flex flex-col gap-1">
+                <Label htmlFor="vn-date">Follow-up date</Label>
+                <DateChips value={ex.follow_up_date ?? ""} onChange={(v) => set("follow_up_date", v)} />
+                <Input id="vn-date" type="date" className="h-11" value={ex.follow_up_date ?? ""} onChange={(e) => set("follow_up_date", e.target.value)} />
               </div>
-              <div className="flex flex-col gap-1">
-                <Label>Follow-up task</Label>
-                <Input className="h-11" value={ex.follow_up_title ?? ""} onChange={(e) => set("follow_up_title", e.target.value)} />
+              <div className="col-span-2 flex flex-col gap-1">
+                <Label htmlFor="vn-task">Follow-up task</Label>
+                <Input id="vn-task" className="h-11" value={ex.follow_up_title ?? ""} onChange={(e) => set("follow_up_title", e.target.value)} />
               </div>
             </div>
             <details className="text-xs text-muted-foreground">
@@ -251,7 +301,7 @@ export function VoiceNoteSheet({ lead, open, onOpenChange }: VoiceNoteSheetProps
               <p className="mt-1 whitespace-pre-wrap">{transcript}</p>
             </details>
             <div className="flex gap-2">
-              <Button variant="outline" className="h-12 flex-1" onClick={() => setPhase("record")} disabled={saving}>
+              <Button variant="outline" className="h-12 flex-1" onClick={() => { savedSteps.current = { note: false, lead: false, task: false }; setPhase("record"); }} disabled={saving}>
                 Re-record
               </Button>
               <Button className="h-12 flex-1" onClick={handleSave} disabled={saving}>

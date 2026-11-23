@@ -5,10 +5,12 @@ import { AlertDialog as AlertDialogPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { useBackToClose } from "@/hooks/useBackToClose"
 
 function AlertDialog({
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Root>) {
+  useBackToClose(props.open, props.onOpenChange)
   return <AlertDialogPrimitive.Root data-slot="alert-dialog" {...props} />
 }
 

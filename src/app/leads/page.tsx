@@ -36,29 +36,20 @@ import { PullToRefresh } from "@/components/shared/PullToRefresh";
 import {
   CallQueueSheet,
   type CallQueueContact,
-  type FollowUpPrompt,
 } from "@/components/shared/CallQueueSheet";
 import { AttemptBadge } from "@/components/leads/AttemptBadge";
-import { StageMoveForm } from "@/components/leads/StageMoveForm";
+import { buildCallContacts, useLeadCalling } from "@/components/leads/useLeadCalling";
 import { useIsDesktop } from "@/hooks/useIsDesktop";
+import { usePersistentState } from "@/hooks/usePersistentState";
 import { leadsKey, useBulkDeleteLeads, useLeads } from "@/lib/queries/leads";
 import { usePipelineStages } from "@/lib/queries/pipelineStages";
-import { fetchOpenTaskLeadIds, useMoveLeads } from "@/lib/queries/leadMoves";
-import { useCreateLeadNote, useCreateTask } from "@/lib/queries/tasks";
 import {
   contactStatus,
-  dateInDays,
-  findCallBackStage,
-  findFirstActiveStage,
-  findStageByKind,
   isClosedLead,
   isEntryLead,
-  leadStageKind,
-  suggestAfterCall,
   type ContactStatus,
 } from "@/lib/leadFlow";
 import { cn, formatDisplayDate, formatPhone, formatRelativeDate } from "@/lib/utils";
-import { CALL_OUTCOME_LABELS, type CallOutcome } from "@/types";
 
 type ViewMode = "list" | "kanban";
 type LeadViewFilter = "active" | "closed";
@@ -66,14 +57,14 @@ type LeadTab = "raw" | "pipeline";
 
 export default function LeadsPage() {
   const isDesktop = useIsDesktop();
-  const [leadTab, setLeadTab] = useState<LeadTab>("raw");
-  const [view, setView] = useState<ViewMode>("list");
-  const [search, setSearch] = useState("");
-  const [stageFilter, setStageFilter] = useState<string | null>(null);
-  const [sourceFilter, setSourceFilter] = useState<string | null>(null);
-  const [projectFilter, setProjectFilter] = useState<string | null>(null);
-  const [viewFilter, setViewFilter] = useState<LeadViewFilter>("active");
-  const [contactFilter, setContactFilter] = useState<ContactStatus | null>(null);
+  const [leadTab, setLeadTab] = usePersistentState<LeadTab>("leads:tab", "raw");
+  const [view, setView] = usePersistentState<ViewMode>("leads:view", "list");
+  const [search, setSearch] = usePersistentState("leads:search", "");
+  const [stageFilter, setStageFilter] = usePersistentState<string | null>("leads:stage", null);
+  const [sourceFilter, setSourceFilter] = usePersistentState<string | null>("leads:source", null);
+  const [projectFilter, setProjectFilter] = usePersistentState<string | null>("leads:project", null);
+  const [viewFilter, setViewFilter] = usePersistentState<LeadViewFilter>("leads:viewFilter", "active");
+  const [contactFilter, setContactFilter] = usePersistentState<ContactStatus | null>("leads:contact", null);
   const [formOpen, setFormOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -87,9 +78,7 @@ export default function LeadsPage() {
   const [callQueueOpen, setCallQueueOpen] = useState(false);
   const [callQueue, setCallQueue] = useState<CallQueueContact[]>([]);
   const queryClient = useQueryClient();
-  const moveLeads = useMoveLeads();
-  const createLeadNote = useCreateLeadNote();
-  const createTask = useCreateTask();
+  const { logOutcome: handleCallOutcome, followUpForOutcome } = useLeadCalling();
 
   const { data: leads = [], isLoading, isError } = useLeads();
   const { data: stages = [] } = usePipelineStages();
@@ -245,139 +234,13 @@ export default function LeadsPage() {
   function startCalling() {
     const source =
       selectionMode && selectedLeads.length > 0 ? selectedLeads : filtered;
-    const contacts: CallQueueContact[] = source.flatMap((lead) => {
-      const base =
-        [lead.pipeline_stages?.label, lead.project_interest]
-          .filter(Boolean)
-          .join(" · ") || null;
-      const additional: string[] = Array.isArray(lead.custom_data?.additional_phones)
-        ? (lead.custom_data.additional_phones as unknown[]).filter(
-            (p): p is string => typeof p === "string" && Boolean(p)
-          )
-        : [];
-      const numbers: { phone: string; tag: string | null }[] = [];
-      if (lead.phone) numbers.push({ phone: lead.phone, tag: null });
-      if (lead.alt_phone) numbers.push({ phone: lead.alt_phone, tag: "Alt" });
-      additional.forEach((phone, i) =>
-        numbers.push({ phone, tag: `Phone ${i + 3}` })
-      );
-      const seen = new Set<string>();
-      return numbers
-        .filter(({ phone }) => {
-          if (seen.has(phone)) return false;
-          seen.add(phone);
-          return true;
-        })
-        .map(({ phone, tag }, i) => ({
-          id: `${lead.id}:${i}`,
-          recordId: lead.id,
-          name: lead.name,
-          phone,
-          subtitle: [base, tag].filter(Boolean).join(" · ") || null,
-        }));
-    });
+    const contacts = buildCallContacts(source);
     if (contacts.length === 0) {
       toast.error("No contacts with phone numbers in this list");
       return;
     }
     setCallQueue(contacts);
     setCallQueueOpen(true);
-  }
-
-  async function handleCallOutcome(
-    contact: CallQueueContact,
-    outcome: CallOutcome,
-    opts?: { note?: string; followUpDate?: string }
-  ) {
-    const label = CALL_OUTCOME_LABELS[outcome];
-    try {
-      await createLeadNote.mutateAsync({
-        lead_id: contact.recordId,
-        content: opts?.note
-          ? `Call (${label}) ${contact.phone}: ${opts.note}`
-          : `Call (${label}) ${contact.phone}`,
-        note_type: "call",
-      });
-      if (outcome === "callback" && opts?.followUpDate) {
-        await createTask.mutateAsync({
-          lead_id: contact.recordId,
-          title: `Call back ${contact.name}`,
-          due_date: opts.followUpDate,
-          due_time: null,
-        });
-      }
-      toast.success(`${contact.name} — ${label}`);
-    } catch {
-      toast.error(`Failed to log call for ${contact.name}`);
-      throw new Error("call-log-failed");
-    }
-
-    // Outcome-driven follow-through. The call itself is already logged, so a
-    // failure here only affects the extra step and never blocks the queue.
-    const lead = leads.find((l) => l.id === contact.recordId);
-    if (!lead || isClosedLead(lead)) return;
-    try {
-      if (outcome === "callback") {
-        const callBack = findCallBackStage(stages);
-        if (callBack && lead.stage_id !== callBack.id) {
-          await moveLeads.mutateAsync({ ids: [lead.id], stage_id: callBack.id });
-        }
-      } else if (outcome === "no_answer") {
-        const hasTask = (await fetchOpenTaskLeadIds([lead.id])).has(lead.id);
-        if (!hasTask) {
-          await createTask.mutateAsync({
-            lead_id: lead.id,
-            title: `Call ${contact.name} again`,
-            due_date: dateInDays(1),
-            due_time: null,
-          });
-          toast.info(`Follow-up set for tomorrow`);
-        }
-      }
-    } catch {
-      toast.warning(`Call logged, but the follow-up for ${contact.name} could not be set`);
-    }
-  }
-
-  function followUpForOutcome(
-    contact: CallQueueContact,
-    outcome: CallOutcome
-  ): FollowUpPrompt | null {
-    const lead = leads.find((l) => l.id === contact.recordId);
-    if (!lead) return null;
-    const suggestion = suggestAfterCall(outcome, leadStageKind(lead));
-
-    if (suggestion.type === "qualify") {
-      const stage = findFirstActiveStage(stages);
-      if (!stage) return null;
-      return {
-        title: `Qualify ${lead.name}?`,
-        description: `Move to ${stage.label} and set a next step.`,
-        skipLabel: "Not yet",
-        render: (done) => (
-          <StageMoveForm leads={[lead]} stage={stage} submitLabel="Qualify" onDone={done} />
-        ),
-      };
-    }
-    if (suggestion.type === "disqualify") {
-      const stage = findStageByKind(stages, "disqualified");
-      if (!stage) return null;
-      return {
-        title: `Disqualify ${lead.name}?`,
-        description: "Moves the lead out of your working lists.",
-        skipLabel: "Keep as is",
-        render: (done) => (
-          <StageMoveForm
-            leads={[lead]}
-            stage={stage}
-            initialReason={suggestion.reason}
-            submitLabel="Disqualify"
-            onDone={done}
-          />
-        ),
-      };
-    }
-    return null;
   }
 
   const listHeader = (
@@ -453,11 +316,25 @@ export default function LeadsPage() {
       <div className="relative mt-3">
         <Search className="absolute top-1/2 left-3 -translate-y-1/2 text-muted-foreground" />
         <Input
+          type="search"
+          inputMode="search"
+          enterKeyHint="search"
+          autoComplete="off"
           placeholder="Search name, phone, email…"
-          className="h-12 pl-9"
+          className="h-12 pl-9 pr-11 [&::-webkit-search-cancel-button]:hidden"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
+        {search && (
+          <button
+            type="button"
+            onClick={() => setSearch("")}
+            aria-label="Clear search"
+            className="absolute top-1/2 right-1 flex size-10 -translate-y-1/2 items-center justify-center text-muted-foreground"
+          >
+            <X className="size-4" />
+          </button>
+        )}
       </div>
 
       <div className="mt-2">
@@ -625,6 +502,8 @@ export default function LeadsPage() {
   const listBody = (
     <PullToRefresh
       onRefresh={handleRefresh}
+      restoreKey={`leads:${leadTab}`}
+      restoreReady={!isLoading}
       className={cn("flex-1", splitMode ? "overflow-y-auto" : "px-4 py-4")}
     >
       {isLoading ? (
@@ -637,7 +516,7 @@ export default function LeadsPage() {
         <div className={splitMode ? "p-4" : undefined}>
           <EmptyState
             title="Could not load leads"
-            description="Check your Supabase connection and run the migration in supabase/migrations/001_initial_schema.sql"
+            description="Check your internet connection and pull down to retry."
             actionLabel="Try again"
             onAction={handleRefresh}
           />
@@ -758,7 +637,7 @@ export default function LeadsPage() {
 
       <Button
         size="icon-lg"
-        className="fixed right-4 bottom-20 z-40 size-14 rounded-full shadow-card md:right-6 md:bottom-6"
+        className={cn("fixed right-4 bottom-20 z-40 size-14 rounded-full shadow-card md:right-6 md:bottom-6", selectionMode && "hidden")}
         onClick={() => setFormOpen(true)}
         aria-label="Add lead"
       >
@@ -868,7 +747,7 @@ function FilterChip({
       type="button"
       onClick={onClick}
       className={cn(
-        "shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+        "shrink-0 rounded-full border px-4 py-2.5 text-sm font-medium transition-colors",
         active
           ? "border-primary bg-primary text-primary-foreground"
           : "border-border bg-card text-muted-foreground"

@@ -64,6 +64,7 @@ export function ProjectMediaUploader({ project }: ProjectMediaUploaderProps) {
   }
 
   async function handleDelete(item: ProjectMedia) {
+    if (!window.confirm("Delete this file? This cannot be undone.")) return;
     try {
       await deleteMedia.mutateAsync(item);
       toast.success("Media deleted");

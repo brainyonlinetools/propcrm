@@ -347,7 +347,7 @@ function SortableFieldRow({
         </label>
         <AlertDialog>
         <AlertDialogTrigger asChild>
-          <Button variant="ghost" size="icon-sm">
+          <Button variant="ghost" size="icon" className="size-11" aria-label="Delete">
             <Trash2 className="text-destructive" />
           </Button>
         </AlertDialogTrigger>
@@ -500,7 +500,9 @@ function SortableStageRow({
         <AlertDialogTrigger asChild>
           <Button
             variant="ghost"
-            size="icon-sm"
+            size="icon"
+            className="size-11"
+            aria-label="Delete stage"
             disabled={stage.kind !== "active"}
             title={stage.kind !== "active" ? "Built-in stage" : undefined}
           >
@@ -651,7 +653,7 @@ function WhatsAppTemplatesManager() {
             <div className="flex justify-end">
               <AlertDialog>
                 <AlertDialogTrigger asChild>
-                  <Button variant="ghost" size="icon-sm">
+                  <Button variant="ghost" size="icon" className="size-11" aria-label="Delete">
                     <Trash2 className="text-destructive" />
                   </Button>
                 </AlertDialogTrigger>

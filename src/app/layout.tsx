@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
+import { CallReturnPrompt } from "@/components/shared/CallReturnPrompt";
 import { BottomNav } from "@/components/shared/BottomNav";
 import { QueryProvider } from "@/components/providers/QueryProvider";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
@@ -57,7 +58,6 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#fafafa" },
     { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
@@ -82,6 +82,7 @@ export default function RootLayout({
           <QueryProvider>
             <PushNotificationProvider />
             <TaskReminderPoller />
+            <CallReturnPrompt />
             <div className="mx-auto min-h-dvh w-full max-w-lg overflow-x-hidden pb-20 md:max-w-none md:pb-0 md:pl-16">
               {children}
             </div>

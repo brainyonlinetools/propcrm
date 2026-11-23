@@ -54,7 +54,7 @@ export function BottomNav() {
               <Icon className={cn("size-5 shrink-0", isActive && "text-brand-accent")} />
               <span
                 className={cn(
-                  "w-full truncate text-center text-[10px] font-medium",
+                  "w-full truncate text-center text-[11px] font-medium",
                   "md:hidden",
                   isActive ? "text-brand-accent" : "text-mute"
                 )}

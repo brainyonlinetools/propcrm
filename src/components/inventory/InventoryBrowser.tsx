@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { usePersistentState } from "@/hooks/usePersistentState";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { Plus, Search, Upload, X, ChevronDown } from "lucide-react";
@@ -32,11 +33,11 @@ const STATUSES: InventoryStatus[] = ["available", "blocked", "booked", "sold"];
 export function InventoryBrowser() {
   const isDesktop = useIsDesktop();
   const router = useRouter();
-  const [view, setView] = useState<ListViewMode>("table");
-  const [search, setSearch] = useState("");
-  const [projectFilter, setProjectFilter] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<InventoryStatus | null>(null);
-  const [typeFilter, setTypeFilter] = useState<string | null>(null);
+  const [view, setView] = usePersistentState<ListViewMode>("inv:view", "table");
+  const [search, setSearch] = usePersistentState("inv:search", "");
+  const [projectFilter, setProjectFilter] = usePersistentState<string | null>("inv:project", null);
+  const [statusFilter, setStatusFilter] = usePersistentState<InventoryStatus | null>("inv:status", null);
+  const [typeFilter, setTypeFilter] = usePersistentState<string | null>("inv:type", null);
   const [formOpen, setFormOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -239,6 +240,8 @@ export function InventoryBrowser() {
   const listBody = (
     <PullToRefresh
       onRefresh={handleRefresh}
+      restoreKey="inventory"
+      restoreReady={!isLoading}
       className={cn("flex-1 px-4 py-4", isDesktop && "overflow-y-auto")}
     >
       {isLoading ? (

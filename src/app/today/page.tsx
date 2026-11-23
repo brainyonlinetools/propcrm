@@ -1,14 +1,18 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { Phone } from "lucide-react";
+import { Phone, PhoneCall } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TaskItem } from "@/components/tasks/TaskItem";
 import { PullToRefresh } from "@/components/shared/PullToRefresh";
+import { CallQueueSheet, type CallQueueContact } from "@/components/shared/CallQueueSheet";
+import { buildCallContacts, useLeadCalling } from "@/components/leads/useLeadCalling";
+import { markCallStarted } from "@/lib/pendingCall";
+import { toast } from "sonner";
 import { leadsKey, useLeads } from "@/lib/queries/leads";
 import { useTasks } from "@/lib/queries/tasks";
 import { sellersKey, useSellers } from "@/lib/queries/sellers";
@@ -26,7 +30,10 @@ export default function TodayPage() {
   const { data: sellers = [], isLoading: sellersLoading, isError: sellersError } =
     useSellers();
 
-  const { data: leads = [] } = useLeads();
+  const { data: leads = [], isLoading: leadsLoading, isError: leadsError } = useLeads();
+  const { logOutcome, followUpForOutcome } = useLeadCalling();
+  const [queueOpen, setQueueOpen] = useState(false);
+  const [queue, setQueue] = useState<CallQueueContact[]>([]);
 
   const needsStep = useMemo(() => {
     const withTask = new Set(tasks.map((t) => t.lead_id));
@@ -46,10 +53,23 @@ export default function TodayPage() {
     };
   }, [tasks, sellers, todayStr]);
 
-  const isLoading = tasksLoading || sellersLoading;
-  const isError = tasksError || sellersError;
+  const isLoading = tasksLoading || sellersLoading || leadsLoading;
+  const isError = tasksError || sellersError || leadsError;
   const totalCount =
     overdueTasks.length + todayTasks.length + overdueSellers.length + todaySellers.length;
+
+  function startCalling() {
+    const ids = new Set<string>();
+    [...overdueTasks, ...todayTasks].forEach((t) => ids.add(t.lead_id));
+    needsStep.forEach((l) => ids.add(l.id));
+    const contacts = buildCallContacts(leads.filter((l) => ids.has(l.id)));
+    if (contacts.length === 0) {
+      toast.error("No leads with phone numbers to call right now");
+      return;
+    }
+    setQueue(contacts);
+    setQueueOpen(true);
+  }
 
   async function handleRefresh() {
     await Promise.all([
@@ -62,14 +82,27 @@ export default function TodayPage() {
   return (
     <div className="flex min-h-dvh flex-col">
       <header className="sticky top-0 z-40 border-b border-border bg-background/95 px-4 py-3 backdrop-blur-sm">
-        <h1 className="text-lg font-semibold tracking-tight">Today</h1>
-        <p className="text-xs text-muted-foreground">
-          {format(new Date(), "EEEE, d MMM yyyy")}
-          {totalCount > 0 && ` · ${totalCount} due`}
-        </p>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h1 className="text-lg font-semibold tracking-tight">Today</h1>
+            <p className="text-xs text-muted-foreground">
+              {format(new Date(), "EEEE, d MMM yyyy")}
+              {overdueTasks.length + overdueSellers.length > 0 &&
+                ` · ${overdueTasks.length + overdueSellers.length} overdue`}
+              {todayTasks.length + todaySellers.length > 0 &&
+                ` · ${todayTasks.length + todaySellers.length} today`}
+            </p>
+          </div>
+          {!isLoading && !isError && (
+            <Button className="h-11 gap-2" onClick={startCalling}>
+              <PhoneCall className="size-4" />
+              Start calling
+            </Button>
+          )}
+        </div>
       </header>
 
-      <PullToRefresh onRefresh={handleRefresh} className="flex-1 px-4 py-4">
+      <PullToRefresh onRefresh={handleRefresh} restoreKey="today" restoreReady={!isLoading} className="flex-1 px-4 py-4">
         {isLoading ? (
           <div className="flex flex-col gap-3">
             {Array.from({ length: 4 }).map((_, i) => (
@@ -80,7 +113,7 @@ export default function TodayPage() {
           <div className="rounded-lg border border-dashed border-border bg-card p-8 text-center">
             <h2 className="text-base font-semibold">Could not load today&apos;s list</h2>
             <p className="mt-2 text-sm text-muted-foreground">
-              Check your Supabase connection.
+              Check your internet connection and pull down to retry.
             </p>
             <Button className="mt-4" onClick={handleRefresh}>
               Try again
@@ -140,6 +173,15 @@ export default function TodayPage() {
           </div>
         )}
       </PullToRefresh>
+
+      <CallQueueSheet
+        open={queueOpen}
+        onOpenChange={setQueueOpen}
+        title="Today's calls"
+        contacts={queue}
+        onLogOutcome={logOutcome}
+        followUp={followUpForOutcome}
+      />
     </div>
   );
 }
@@ -170,7 +212,7 @@ function SellerFollowUpRow({ seller }: { seller: Seller }) {
         </p>
       </Link>
       {phone && (
-        <Button asChild variant="outline" size="icon" className="shrink-0" aria-label={`Call ${seller.owner_name}`}>
+        <Button asChild variant="outline" size="icon" className="size-11 shrink-0" aria-label={`Call ${seller.owner_name}`}>
           <a href={`tel:${phoneToTel(phone)}`}>
             <Phone />
           </a>
@@ -194,8 +236,8 @@ function LeadNeedsStepRow({ lead }: { lead: Lead }) {
         </p>
       </Link>
       {lead.phone && (
-        <Button asChild variant="outline" size="icon" className="shrink-0" aria-label={`Call ${lead.name}`}>
-          <a href={`tel:${phoneToTel(lead.phone)}`}>
+        <Button asChild variant="outline" size="icon" className="size-11 shrink-0" aria-label={`Call ${lead.name}`}>
+          <a href={`tel:${phoneToTel(lead.phone)}`} onClick={() => markCallStarted(lead.id, lead.phone!)}>
             <Phone />
           </a>
         </Button>

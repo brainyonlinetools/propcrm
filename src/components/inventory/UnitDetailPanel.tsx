@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, MessageCircle, Pencil, Phone, Share2, Trash2 } from "lucide-react";
+import { MessageCircle, Pencil, Phone, Share2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { BackButton } from "@/components/shared/BackButton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -170,11 +171,7 @@ export function UnitDetailPanel({
     <div className="flex flex-col gap-6 p-4">
       <div className="flex items-center gap-2">
         {!embedded && (
-          <Button asChild variant="ghost" size="icon">
-            <Link href="/inventory">
-              <ArrowLeft />
-            </Link>
-          </Button>
+          <BackButton fallbackHref="/inventory" />
         )}
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-lg font-semibold">{unit.unit_number}</h1>

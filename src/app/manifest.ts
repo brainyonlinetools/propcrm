@@ -5,13 +5,18 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "Anand Prime CRM",
     short_name: "Anand Prime",
     description: "Premium real estate CRM for Anand Prime, Gurugram",
-    start_url: "/leads",
+    start_url: "/today",
     scope: "/",
     display: "standalone",
     orientation: "portrait",
     background_color: "#fafafa",
     theme_color: "#0070f3",
     categories: ["business", "productivity"],
+    shortcuts: [
+      { name: "Today", url: "/today" },
+      { name: "Leads", url: "/leads" },
+      { name: "Tasks", url: "/tasks" },
+    ],
     icons: [
       {
         src: "/icons/icon-192.png",

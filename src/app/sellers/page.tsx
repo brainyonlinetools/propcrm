@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { usePersistentState } from "@/hooks/usePersistentState";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -33,9 +34,9 @@ const UNASSIGNED = "__unassigned__";
 export default function SellersPage() {
   const isDesktop = useIsDesktop();
   const router = useRouter();
-  const [tab, setTab] = useState<SellersTab>("sellers");
-  const [search, setSearch] = useState("");
-  const [projectFilter, setProjectFilter] = useState<string | null>(null);
+  const [tab, setTab] = usePersistentState<SellersTab>("sellers:tab", "sellers");
+  const [search, setSearch] = usePersistentState("sellers:search", "");
+  const [projectFilter, setProjectFilter] = usePersistentState<string | null>("sellers:project", null);
   const [formOpen, setFormOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -226,6 +227,8 @@ export default function SellersPage() {
   const listBody = (
     <PullToRefresh
       onRefresh={handleRefresh}
+      restoreKey="sellers"
+      restoreReady={!isLoading}
       className={cn("flex-1 px-4 py-4", isDesktop && "overflow-y-auto")}
     >
       {isLoading ? (
