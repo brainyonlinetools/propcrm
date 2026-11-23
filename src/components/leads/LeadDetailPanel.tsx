@@ -3,7 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Copy, Pencil, Trash2 } from "lucide-react";
+import { ArrowLeft, Copy, Mic, Pencil, Trash2 } from "lucide-react";
+import { VoiceNoteSheet } from "@/components/leads/VoiceNoteSheet";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -87,6 +88,7 @@ export function LeadDetailPanel({ id, embedded = false, onDeleted }: LeadDetailP
   const [taskDue, setTaskDue] = useState("");
   const [taskTime, setTaskTime] = useState("");
   const [unitSearchOpen, setUnitSearchOpen] = useState(false);
+  const [voiceOpen, setVoiceOpen] = useState(false);
 
   if (isLoading) {
     return (
@@ -247,6 +249,16 @@ export function LeadDetailPanel({ id, embedded = false, onDeleted }: LeadDetailP
             </div>
           </div>
         ))}
+
+        <Button
+          type="button"
+          variant="outline"
+          className="h-12 w-full gap-2"
+          onClick={() => setVoiceOpen(true)}
+        >
+          <Mic className="size-4" />
+          Voice note
+        </Button>
 
         <div className="flex flex-wrap items-center gap-2">
           {lead.pipeline_stages && (
@@ -445,6 +457,7 @@ export function LeadDetailPanel({ id, embedded = false, onDeleted }: LeadDetailP
 
       <LeadForm open={editOpen} onOpenChange={setEditOpen} lead={lead} />
       {stageDialog}
+      <VoiceNoteSheet lead={lead} open={voiceOpen} onOpenChange={setVoiceOpen} />
     </div>
   );
 }
