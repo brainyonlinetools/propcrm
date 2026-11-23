@@ -35,19 +35,43 @@ export function PullToRefresh({
     if (!storageKey || !restoreReady || restoredRef.current) return;
     restoredRef.current = true;
     try {
-      const saved = Number(sessionStorage.getItem(storageKey));
-      if (saved > 0 && containerRef.current) containerRef.current.scrollTop = saved;
+      const saved = JSON.parse(sessionStorage.getItem(storageKey) ?? "null") as
+        | { c: number; w: number }
+        | null;
+      if (saved?.c && containerRef.current) containerRef.current.scrollTop = saved.c;
+      if (saved?.w) window.scrollTo(0, saved.w);
     } catch {
       /* ignore */
     }
   }, [storageKey, restoreReady]);
+
+  // On phones the page itself scrolls, so track window scroll too.
+  useEffect(() => {
+    if (!storageKey) return;
+    const save = () => {
+      if (!restoredRef.current) return;
+      try {
+        sessionStorage.setItem(
+          storageKey,
+          JSON.stringify({ c: containerRef.current?.scrollTop ?? 0, w: window.scrollY })
+        );
+      } catch {
+        /* ignore */
+      }
+    };
+    window.addEventListener("scroll", save, { passive: true });
+    return () => window.removeEventListener("scroll", save);
+  }, [storageKey]);
 
   const handleScroll = useCallback(() => {
     if (!storageKey || !restoredRef.current) return;
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = requestAnimationFrame(() => {
       try {
-        sessionStorage.setItem(storageKey, String(containerRef.current?.scrollTop ?? 0));
+        sessionStorage.setItem(
+          storageKey,
+          JSON.stringify({ c: containerRef.current?.scrollTop ?? 0, w: window.scrollY })
+        );
       } catch {
         /* ignore */
       }
@@ -55,7 +79,7 @@ export function PullToRefresh({
   }, [storageKey]);
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    if (containerRef.current?.scrollTop === 0) {
+    if (containerRef.current?.scrollTop === 0 && window.scrollY <= 0) {
       startY.current = e.touches[0].clientY;
     }
   }, []);
@@ -64,7 +88,7 @@ export function PullToRefresh({
     (e: React.TouchEvent) => {
       if (startY.current === 0 || refreshing) return;
       const diff = e.touches[0].clientY - startY.current;
-      if (diff > 0 && (containerRef.current?.scrollTop ?? 0) <= 0) {
+      if (diff > 0 && (containerRef.current?.scrollTop ?? 0) <= 0 && window.scrollY <= 0) {
         pullDistance.current = Math.min(diff, 80);
         const isPulling = pullDistance.current > 40;
         pullingRef.current = isPulling;
@@ -93,7 +117,7 @@ export function PullToRefresh({
   return (
     <div
       ref={containerRef}
-      className={cn("relative overflow-y-auto overscroll-y-contain", className)}
+      className={cn("relative overflow-y-auto", className)}
       onScroll={handleScroll}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}

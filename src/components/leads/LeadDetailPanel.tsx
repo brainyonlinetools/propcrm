@@ -280,6 +280,32 @@ export function LeadDetailPanel({ id, embedded = false, onDeleted }: LeadDetailP
         </AlertDialog>
       </div>
 
+      {/* Primary actions, right under the name */}
+      <div className="flex items-center gap-2">
+        {primary && <CallButton phone={primary} leadId={lead.id} className="flex-1" />}
+        {primary && <WhatsAppButton lead={lead} phone={primary} className="h-12 flex-1" />}
+        <Button
+          type="button"
+          variant="outline"
+          className="size-12 shrink-0"
+          aria-label="Voice note"
+          onClick={() => setVoiceOpen(true)}
+        >
+          <Mic />
+        </Button>
+        {primary && (
+          <Button
+            type="button"
+            variant="outline"
+            className="size-12 shrink-0"
+            aria-label="Log call outcome"
+            onClick={() => setOutcomeOpen(true)}
+          >
+            <ClipboardCheck />
+          </Button>
+        )}
+      </div>
+
       <section className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
           {lead.pipeline_stages && (
@@ -532,32 +558,6 @@ export function LeadDetailPanel({ id, embedded = false, onDeleted }: LeadDetailP
           </section>
         </TabsContent>
       </Tabs>
-
-      {/* Primary actions stay reachable while scrolling (sits above the bottom nav on phones) */}
-      <div className="sticky bottom-[calc(4rem+env(safe-area-inset-bottom))] z-30 -mx-4 flex items-center gap-2 border-t border-border bg-background/95 px-4 py-2 backdrop-blur-sm md:bottom-0">
-        {primary && <CallButton phone={primary} leadId={lead.id} className="flex-1" />}
-        {primary && <WhatsAppButton lead={lead} phone={primary} className="h-12 flex-1" />}
-        <Button
-          type="button"
-          variant="outline"
-          className="size-12 shrink-0"
-          aria-label="Voice note"
-          onClick={() => setVoiceOpen(true)}
-        >
-          <Mic />
-        </Button>
-        {primary && (
-          <Button
-            type="button"
-            variant="outline"
-            className="size-12 shrink-0"
-            aria-label="Log call outcome"
-            onClick={() => setOutcomeOpen(true)}
-          >
-            <ClipboardCheck />
-          </Button>
-        )}
-      </div>
 
       <LeadForm open={editOpen} onOpenChange={setEditOpen} lead={lead} />
       <VoiceNoteSheet lead={lead} open={voiceOpen} onOpenChange={setVoiceOpen} />
